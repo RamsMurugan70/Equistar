@@ -1,0 +1,203 @@
+/* ============================================================================
+   ZTA · Equix — "Modern Light" theme  (reversible overlay)
+   All rules are namespaced under [data-theme="modern"] so the Classic theme
+   (styles.css) is never altered. Toggle data-theme on <html> to switch.
+   ============================================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+[data-theme="modern"] {
+  --bg:         #f5f6f8;
+  --surface:    #ffffff;
+  --surface-2:  #f8fafc;
+  --text:       #0f172a;
+  --muted:      #64748b;
+  --border:     #e9ecf1;
+  --border-2:   #f1f3f6;
+  --primary:    #4f46e5;
+  --primary-600:#4338ca;
+  --primary-soft:#eef2ff;
+  --pos:        #15a34a;
+  --pos-soft:   #e7f7ed;
+  --neg:        #e0414b;
+  --neg-soft:   #fdeced;
+  --warn-soft:  #fff6e6;
+  --warn-text:  #9a6700;
+  --radius:     14px;
+  --radius-sm:  9px;
+  --shadow-sm:  0 1px 2px rgba(16,24,40,.05);
+  --shadow:     0 6px 22px rgba(16,24,40,.07);
+  --shadow-lg:  0 16px 40px rgba(16,24,40,.12);
+  font-family: 'Inter', system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--text);
+}
+
+[data-theme="modern"] body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Sidebar — deep slate, premium ───────────────────────────────────────── */
+[data-theme="modern"] .sidebar {
+  background: #0f172a;
+  border-right: 1px solid #1e293b;
+  box-shadow: none;
+}
+[data-theme="modern"] .sidebar h1 { color: #fff; letter-spacing: -0.02em; font-weight: 800; }
+[data-theme="modern"] .sidebar p  { color: #94a3b8; }
+[data-theme="modern"] .sidebar-section-label { color: #64748b; letter-spacing: .08em; }
+[data-theme="modern"] .sidebar a {
+  color: #cbd5e1;
+  border-radius: 10px;
+  font-weight: 500;
+  transition: background .15s ease, color .15s ease;
+}
+[data-theme="modern"] .sidebar a:hover { background: #1e293b; color: #fff; }
+[data-theme="modern"] .sidebar a.active {
+  background: linear-gradient(135deg, var(--primary), #6366f1);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(79,70,229,.35);
+}
+
+/* ── Page header ─────────────────────────────────────────────────────────── */
+[data-theme="modern"] .page-header h1 { color: var(--text); letter-spacing: -0.025em; font-weight: 800; }
+[data-theme="modern"] .page-header p  { color: var(--muted); }
+
+/* ── Cards & panels ──────────────────────────────────────────────────────── */
+[data-theme="modern"] .stat-card,
+[data-theme="modern"] .panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+[data-theme="modern"] .stat-card { transition: box-shadow .18s ease, transform .18s ease; }
+[data-theme="modern"] .stat-card:hover { box-shadow: var(--shadow); transform: translateY(-2px); }
+[data-theme="modern"] .stat-label, [data-theme="modern"] .stat-helper { color: var(--muted); }
+[data-theme="modern"] .stat-value { color: var(--text); letter-spacing: -0.02em; font-weight: 700; }
+[data-theme="modern"] .panel h2 { letter-spacing: -0.015em; }
+
+/* ── Filters / inputs / buttons ──────────────────────────────────────────── */
+[data-theme="modern"] .filters input,
+[data-theme="modern"] .filters select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+[data-theme="modern"] .filters input:focus,
+[data-theme="modern"] .filters select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+[data-theme="modern"] .filters button,
+[data-theme="modern"] .upload-button {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(79,70,229,.25);
+  transition: background .15s ease, box-shadow .15s ease;
+}
+[data-theme="modern"] .filters button:hover,
+[data-theme="modern"] .upload-button:hover { background: var(--primary-600); }
+[data-theme="modern"] .status-note { color: var(--muted); }
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+[data-theme="modern"] .data-table th {
+  background: var(--surface-2);
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: .7rem;
+  letter-spacing: .05em;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+[data-theme="modern"] .data-table td { border-bottom: 1px solid var(--border-2); color: var(--text); }
+[data-theme="modern"] .data-table tbody tr:nth-child(even) { background: #fcfcfd; }
+[data-theme="modern"] .data-table tbody tr:hover { background: var(--primary-soft); }
+
+/* ── Symbol button (link) ────────────────────────────────────────────────── */
+[data-theme="modern"] .symbol-button { color: var(--primary); font-weight: 600; }
+[data-theme="modern"] .symbol-button:hover { color: var(--primary-600); text-decoration: underline; }
+[data-theme="modern"] .symbol-cell span { color: var(--muted); }
+
+/* ── Modal ───────────────────────────────────────────────────────────────── */
+[data-theme="modern"] .modal-panel {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+}
+[data-theme="modern"] .modal-header p { color: var(--muted); }
+
+/* ── Semantic text ───────────────────────────────────────────────────────── */
+[data-theme="modern"] .positive { color: var(--pos); }
+[data-theme="modern"] .negative { color: var(--neg); }
+[data-theme="modern"] .muted    { color: var(--muted); }
+
+/* ── Pills & badges (refined, consistent) ────────────────────────────────── */
+[data-theme="modern"] .score-pill,
+[data-theme="modern"] .signal-badge,
+[data-theme="modern"] .cross-badge,
+[data-theme="modern"] .tax-badge,
+[data-theme="modern"] .source-pill,
+[data-theme="modern"] .reason-pill,
+[data-theme="modern"] .action-count-badge { border-radius: 999px; font-weight: 600; }
+
+[data-theme="modern"] .score-strong, [data-theme="modern"] .signal-HOLD,
+[data-theme="modern"] .action-count-HOLD, [data-theme="modern"] .tax-ltcg,
+[data-theme="modern"] .source-recomputed { background: var(--pos-soft); color: #166534; }
+[data-theme="modern"] .score-weak, [data-theme="modern"] .signal-EXIT,
+[data-theme="modern"] .action-count-EXIT { background: var(--neg-soft); color: #991b1b; }
+[data-theme="modern"] .score-medium, [data-theme="modern"] .signal-WATCH,
+[data-theme="modern"] .action-count-WATCH, [data-theme="modern"] .tax-stcg-soon { background: var(--warn-soft); color: var(--warn-text); }
+[data-theme="modern"] .signal-ACCUMULATE, [data-theme="modern"] .action-count-ACCUMULATE,
+[data-theme="modern"] .source-migrated { background: var(--primary-soft); color: var(--primary-600); }
+[data-theme="modern"] .reason-pill { background: var(--surface-2); color: var(--muted); }
+
+/* ── Action Queue rows ───────────────────────────────────────────────────── */
+[data-theme="modern"] .action-row { border: 1px solid var(--border); border-radius: var(--radius-sm); }
+[data-theme="modern"] .action-row:hover { box-shadow: var(--shadow-sm); border-color: #dfe3ea; }
+[data-theme="modern"] .action-metric-label { color: var(--muted); }
+
+/* ── Performance bars ────────────────────────────────────────────────────── */
+[data-theme="modern"] .perf-bar.portfolio-up   { background: var(--pos); }
+[data-theme="modern"] .perf-bar.portfolio-down { background: var(--neg); }
+[data-theme="modern"] .perf-bar.nifty-up       { background: #a7e3c0; }
+[data-theme="modern"] .perf-bar.nifty-down     { background: #f3b1b5; }
+[data-theme="modern"] .perf-toggle-group button.active { background: var(--primary); color: #fff; }
+
+/* ── Days-bar / LTCG ─────────────────────────────────────────────────────── */
+[data-theme="modern"] .days-bar-fill { background: var(--muted); }
+[data-theme="modern"] .days-bar-fill.ltcg { background: var(--pos); }
+[data-theme="modern"] .ltcg-wait-banner { border-radius: var(--radius-sm); }
+
+/* ── Theme switcher (added to sidebar) ───────────────────────────────────── */
+.theme-switch {
+  margin: 14px 10px 4px;
+  display: flex;
+  gap: 6px;
+  background: rgba(148,163,184,.12);
+  border-radius: 10px;
+  padding: 4px;
+}
+.theme-switch button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.theme-switch button.active { background: #fff; color: #0f172a; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+[data-theme="modern"] .theme-switch button.active { background: var(--primary); color: #fff; }

@@ -1,0 +1,15 @@
+# Python packages the equity engines need.
+#
+# Derived from what the six scripts in this directory and app/scripts actually import, not copied
+# from the desktop app's requirements.txt — that one carries the options stack (breeze-connect,
+# kiteconnect, the Telegram client) which EquiStar does not ship and would only slow the build
+# and widen the attack surface.
+#
+# Unpinned on purpose for now: these are mature libraries and yfinance in particular breaks when
+# it falls behind Yahoo's HTML. Pin them once the deployment is stable and you would rather have
+# a reproducible build than a self-healing one.
+yfinance
+pandas
+numpy
+scipy
+requests

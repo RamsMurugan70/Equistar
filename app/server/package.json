@@ -1,0 +1,17 @@
+{
+  "name": "equistar-app",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate:db": "node src/db/migrations/runMigrations.js",
+    "migrate:legacy": "node src/services/migration/runLegacyMigration.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "sqlite3": "^5.1.7",
+    "xlsx": "^0.18.5"
+  }
+}

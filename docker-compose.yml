@@ -1,0 +1,68 @@
+# EquiStar behind a Cloudflare Tunnel.
+#
+# NO PORTS ARE PUBLISHED. cloudflared dials out to Cloudflare and serves the hub through it, so
+# 80 and 443 stay shut and the box needs no firewall rule to be safe. It also means TLS without
+# owning a domain — which matters here, because the hub sets a Secure session cookie in
+# production and a browser silently drops that over plain http, presenting as "sign in does
+# nothing at all".
+#
+# THE INSTANCE PORTS (5100-5199) ARE NEVER EXPOSED, not even to the host. Participants reach
+# their app only through the hub, which decides where to route from their session — so the
+# routing cannot be talked out of by a crafted URL.
+
+services:
+  equistar:
+    build: .
+    image: equistar:latest
+    restart: unless-stopped
+    expose:
+      - "5080"
+    environment:
+      NODE_ENV: production
+      PORT: "5080"
+      DATA_DIR: /data
+      ENGINES_DIR: /app/engines
+      # Behind Cloudflare, which terminates TLS and sets X-Forwarded-Proto.
+      COOKIE_SECURE: "true"
+      TZ: Asia/Kolkata
+
+      # Read from the host's .env, never baked into the image. The `?` form makes compose fail
+      # loudly on a missing one rather than booting with an improvised secret.
+      SESSION_SECRET: "${SESSION_SECRET:?generate with openssl rand -hex 32}"
+      # Decrypts every participant's stored broker API secret. LOSING THIS MEANS ALL 25 RE-ENTER
+      # THEIR KEYS — keep a copy somewhere other than this server.
+      CREDENTIAL_KEY: "${CREDENTIAL_KEY:?generate with openssl rand -hex 32, and keep a copy}"
+    volumes:
+      - equistar-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5080/hub/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      # Without this the logs grow until the disk is full, which is the single most common way a
+      # small box that has been running fine for months falls over.
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # Unset TUNNEL_TOKEN gives a quick tunnel: no account, no domain, works immediately, but the
+    # hostname CHANGES ON EVERY RESTART. Set it for a named tunnel and one stable hostname —
+    # which is what you want before handing a link to twenty-five people. See DEPLOY.md.
+    command: >
+      sh -c 'if [ -n "$${TUNNEL_TOKEN}" ];
+             then exec cloudflared tunnel --no-autoupdate run --token "$${TUNNEL_TOKEN}";
+             else exec cloudflared tunnel --no-autoupdate --url http://equistar:5080; fi'
+    environment:
+      TUNNEL_TOKEN: "${TUNNEL_TOKEN:-}"
+    depends_on:
+      - equistar
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  equistar-data:

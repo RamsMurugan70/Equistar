@@ -1,0 +1,51 @@
+# Dependencies and build output
+node_modules/
+dist/
+build/
+
+# ── Everything with somebody's data or secrets in it ─────────────────────────
+# The whole data directory: market.db carries a real scan history, hub.db carries accounts and
+# password hashes, and data/users/<login>/app.db is one participant's trading. None of it is
+# code, and none of it belongs in a repository that gets cloned onto a server.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Broker sessions. These are live trading credentials with a day's validity, written next to a
+# participant's database at runtime. One of these committed is somebody's account handed over.
+*_session.json
+breeze_config.json
+kite_config.json
+
+# SESSION_SECRET and CREDENTIAL_KEY. CREDENTIAL_KEY decrypts every participant's stored broker
+# API secret, so a committed .env is worse than a committed database.
+.env
+.env.*
+!.env.example
+
+# Logs and scratch
+*.log
+logs/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Editor backups and desktop-only launchers. An App.jsx.backup-* file carrying a live API key
+# was committed once; the ignore is here so it cannot happen again.
+*.backup-*
+*.bak
+*.orig
+start-zta*.bat
+start-zta*.vbs
+restart-dev.ps1

@@ -1,0 +1,26 @@
+# Anything that would bloat the build context, leak a secret, or be rebuilt in the image.
+node_modules
+**/node_modules
+.git
+.gitignore
+
+# NEVER ship the environment file: CREDENTIAL_KEY decrypts every participant's broker secrets,
+# and baking it into a layer puts it in the image for anyone who can pull it.
+.env
+.env.*
+!.env.example
+
+# Databases and broker sessions live in a volume, not in the image.
+data/
+*.db
+*.db-wal
+*.db-shm
+*_session.json
+*.log
+
+# The client is built inside the image from source; a local dist would shadow it.
+app/client/dist
+
+Dockerfile
+docker-compose.yml
+*.md

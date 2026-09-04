@@ -1,0 +1,115 @@
+:root {
+  --bg: #f4f6f5;
+  --surface: #ffffff;
+  --border: #dfe3e2;
+  --text: #1b1d28;
+  --muted: #565a6b;
+  --accent: #05664a;
+  --danger: #b32d19;
+  --warn: #9a5b06;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+main { max-width: 980px; margin: 0 auto; padding: 32px 20px 64px; }
+main.narrow { max-width: 420px; display: grid; place-items: center; min-height: 100vh; padding: 20px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 26px 28px;
+  width: 100%;
+}
+
+h1 { font-size: 1.35rem; margin: 0 0 4px; }
+h2 { font-size: 1.05rem; margin: 28px 0 10px; }
+.sub { color: var(--muted); font-size: .92rem; margin: 0 0 22px; }
+.muted { color: var(--muted); font-size: .9rem; }
+
+label { display: block; font-size: .86rem; color: var(--muted); margin: 14px 0 5px; }
+
+input, select {
+  width: 100%;
+  padding: 9px 11px;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--text);
+}
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+
+/* The password field and its reveal button share one box, so the eye sits inside the input
+   rather than beside it and the field keeps its full width. */
+.pw { position: relative; }
+.pw input { padding-right: 44px; }
+.pw button {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 34px; height: 30px; padding: 0; border: 0; background: none; cursor: pointer;
+  font-size: 15px; line-height: 1; color: var(--muted);
+}
+.pw button:hover { color: var(--text); }
+
+button {
+  font: inherit;
+  padding: 9px 15px;
+  border-radius: 7px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+button:hover { filter: brightness(1.08); }
+button[disabled] { opacity: .55; cursor: default; filter: none; }
+button.ghost { background: none; color: var(--text); border-color: var(--border); }
+button.danger { background: none; color: var(--danger); border-color: #f0cfc9; }
+button.sm { padding: 5px 10px; font-size: .84rem; }
+
+.row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.row > * { flex: 0 0 auto; }
+.grow { flex: 1 1 160px; }
+.actions { margin-top: 20px; display: flex; gap: 10px; align-items: center; }
+
+.msg { margin-top: 16px; padding: 10px 12px; border-radius: 7px; font-size: .9rem; }
+.msg.err { background: #fdecea; color: var(--danger); }
+.msg.ok { background: #dcfce7; color: #166534; }
+.msg.warn { background: #fef6e7; color: var(--warn); }
+
+table { width: 100%; border-collapse: collapse; font-size: .9rem; margin-top: 8px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+th { color: var(--muted); font-weight: 600; font-size: .82rem; }
+tbody tr:hover { background: #fafbfb; }
+
+.tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .76rem; font-weight: 600; }
+.tag.on { background: #dcfce7; color: #166534; }
+.tag.off { background: #e4e6ea; color: var(--muted); }
+.tag.bad { background: #fdecea; color: var(--danger); }
+.tag.adm { background: #e8f1fc; color: #1355a8; }
+
+/* A generated password is read aloud from this box, so it is monospaced and large enough to
+   read across a table. It is shown once and never retrievable. */
+.secret {
+  margin-top: 14px; padding: 14px 16px; border-radius: 8px;
+  background: #f0f7f4; border: 1px solid #bfe0d2;
+}
+.secret code {
+  display: block; margin-top: 6px;
+  font: 600 1.25rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .06em; color: var(--accent); word-break: break-all;
+}
+
+.bar { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 6px; }
+pre.log {
+  background: #1b1d28; color: #dfe3e2; padding: 12px 14px; border-radius: 8px;
+  font: .8rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  max-height: 220px; overflow: auto; white-space: pre-wrap; margin-top: 10px;
+}
