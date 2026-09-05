@@ -88,6 +88,11 @@ async function start(participant) {
       MARKET_DB_PATH: config.marketDbPath,
       ENGINES_DIR: config.enginesDir,
       INSTANCE_OWNER: loginId,
+      // The name they are actually called, for the sidebar. The login id is an address; a
+      // person's own screen should greet them by name. Read at spawn, so an admin renaming
+      // somebody takes effect the next time their instance starts — display names are not
+      // editable today, so that is not yet a case anyone can hit.
+      INSTANCE_OWNER_NAME: participant.display_name || loginId,
       CREDENTIAL_KEY: config.credentialKey,
     },
     // Not detached: a hub that goes down should not leave 25 orphans holding ports and database

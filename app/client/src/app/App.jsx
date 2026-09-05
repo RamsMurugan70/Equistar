@@ -7119,7 +7119,10 @@ export default function App() {
   // has no user table of its own because it serves exactly one person.
   const [owner, setOwner] = useState(null);
   useEffect(() => {
-    fetch('/api/whoami').then((r) => r.json()).then((d) => setOwner(d.owner)).catch(() => {});
+    // The name they are called, falling back to the login id — which is an address, not a
+    // name, and a poor thing to greet somebody with on their own screen.
+    fetch('/api/whoami').then((r) => r.json())
+      .then((d) => setOwner(d.ownerName || d.owner)).catch(() => {});
   }, []);
   return (
     <div className="app-shell">

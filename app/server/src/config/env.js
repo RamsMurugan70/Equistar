@@ -53,6 +53,7 @@ module.exports = {
   // Which participant this instance belongs to. Set by the hub when it starts the process, and
   // used for log lines only — so a stray process is identifiable in `ps` and in the logs.
   instanceOwner: process.env.INSTANCE_OWNER || null,
+  instanceOwnerName: process.env.INSTANCE_OWNER_NAME || process.env.INSTANCE_OWNER || null,
   // Encrypts this participant's stored broker API secrets. Supplied by the hub, which reads it
   // from its own environment — so the key is never written into any database, and a copy of a
   // participant's file on its own is not enough to use their credentials.

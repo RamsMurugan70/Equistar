@@ -47,7 +47,11 @@ app.use('/api/broker-setup', brokerSetupRoutes);
 app.get('/api/whoami', (_req, res) => {
   const config = require('./config/env');
   const PF = require('./config/portfolios');
-  res.json({ owner: config.instanceOwner, portfolios: PF.ALL });
+  res.json({
+    owner: config.instanceOwner,
+    ownerName: config.instanceOwnerName,
+    portfolios: PF.ALL,
+  });
 });
 
 app.use('/api/ask-data', askDataRoutes);
