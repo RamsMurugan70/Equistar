@@ -149,6 +149,15 @@ app.post('/hub/api/participants/:loginId/disabled', requireAuth, requireAdmin, a
   } catch (e) { fail(res, e); }
 });
 
+app.delete('/hub/api/participants/:loginId', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    if (req.params.loginId === req.participant.login_id) {
+      return res.status(400).json({ error: 'You cannot delete the account you are signed in as.', code: 'SELF' });
+    }
+    return res.json(await accounts.remove(req.params.loginId, req.participant.login_id));
+  } catch (e) { return fail(res, e); }
+});
+
 app.post('/hub/api/participants/:loginId/stop', requireAuth, requireAdmin, (req, res) => {
   res.json({ stopped: instances.stop(String(req.params.loginId).toLowerCase()) });
 });

@@ -251,7 +251,30 @@ async function renderAdmin(participant) {
             reload();
           } catch (e) { out.replaceChildren(msg(e.message)); }
         };
-        actions.append(reset, ' ', setPw, ' ', toggle);
+        // Two clicks, not a confirm() dialog: the second button says what will happen to the
+        // data, which "Are you sure?" does not.
+        const del = el('button', { className: 'danger sm' }, 'Delete');
+        del.onclick = () => {
+          const confirm = el('button', { className: 'danger sm' }, `Delete ${p.loginId} — sure?`);
+          confirm.onclick = async () => {
+            confirm.disabled = true;
+            try {
+              const r = await api(`/hub/api/participants/${p.loginId}`, { method: 'DELETE' });
+              out.replaceChildren(msg(
+                `${r.loginId} removed.${r.archived
+                  ? ` Their data is kept as ${r.archived} — delete it from the server when you are sure.`
+                  : ''}`, 'ok'));
+              reload();
+            } catch (e) {
+              out.replaceChildren(msg(e.message));
+              reload();
+            }
+          };
+          del.replaceWith(confirm);
+          setTimeout(() => { if (confirm.isConnected) confirm.replaceWith(del); }, 5000);
+        };
+
+        actions.append(reset, ' ', setPw, ' ', toggle, ' ', del);
         if (inst.running) {
           const stop = el('button', { className: 'ghost sm' }, 'Stop app');
           stop.onclick = async () => {

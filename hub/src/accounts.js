@@ -1,5 +1,6 @@
 // Participants: creating them, signing them in, and cutting them off.
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const db = require('./db');
 const config = require('./config');
@@ -143,6 +144,58 @@ async function setDisabled(loginId, disabled, actor) {
   return shape(await db.get('SELECT * FROM participants WHERE id = ?', [row.id]));
 }
 
+/**
+ * Removes a participant: the account, their sessions, their running instance, and their port.
+ *
+ * THEIR DATABASE IS MOVED ASIDE, NOT DELETED. It holds their entire trading history, and an
+ * admin clicking Delete on the wrong row is a thing that happens. The directory is renamed to
+ * <login>.deleted-<timestamp>, which frees the name for reuse, takes it out of the app's way, and
+ * leaves the file recoverable by anyone who can reach the disk. Removing it for real is then a
+ * deliberate act with a shell, rather than a consequence of a mis-click.
+ *
+ * The port is freed by the row going away — allocatePort reads the live accounts, so a deleted
+ * participant's port is handed to the next person created.
+ */
+async function remove(loginId, actor) {
+  const row = await byLogin(loginId);
+  if (!row) throw Object.assign(new Error('No such participant.'), { code: 'NOT_FOUND' });
+  if (row.role === 'admin') {
+    const admins = await db.all("SELECT id FROM participants WHERE role = 'admin'");
+    if (admins.length <= 1) {
+      throw Object.assign(
+        new Error('That is the only admin. Create another before removing this one.'),
+        { code: 'LAST_ADMIN' });
+    }
+  }
+
+  instances.stop(row.login_id);
+
+  let archived = null;
+  if (row.db_file) {
+    const dir = path.dirname(path.isAbsolute(row.db_file)
+      ? row.db_file : path.join(config.dataDir, row.db_file));
+    if (fs.existsSync(dir)) {
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const dest = `${dir}.deleted-${stamp}`;
+      try {
+        fs.renameSync(dir, dest);
+        archived = path.basename(dest);
+      } catch (e) {
+        // Windows will refuse while the instance still holds the file. Reported rather than
+        // swallowed: the account is gone either way, and an admin should know the data is not
+        // where the message says it is.
+        console.warn(`⚠ could not archive ${loginId}'s data: ${e.message}`);
+      }
+    }
+  }
+
+  // Sessions go with the row via ON DELETE CASCADE.
+  await db.run('DELETE FROM participants WHERE id = ?', [row.id]);
+  await db.audit(actor, 'participant.delete', row.login_id,
+    archived ? `data archived as ${archived}` : 'no data directory found');
+  return { loginId: row.login_id, archived };
+}
+
 // ── Sign-in ──────────────────────────────────────────────────────────────────
 async function authenticate(loginId, password, { userAgent, ip } = {}) {
   const row = await byLogin(loginId);
@@ -211,6 +264,6 @@ async function changePassword(participantId, currentPassword, newPassword) {
 }
 
 module.exports = {
-  list, create, resetPassword, setPasswordDirect, setDisabled, authenticate, sessionUser, endSession,
+  list, create, remove, resetPassword, setPasswordDirect, setDisabled, authenticate, sessionUser, endSession,
   changePassword, byLogin, shape, generatePassword,
 };
