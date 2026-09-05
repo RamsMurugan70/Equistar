@@ -7157,6 +7157,31 @@ const SC_WINDOWS = [
   ['r1w', '1W'], ['r1m', '1M'], ['r3m', '3M'], ['r6m', '6M'], ['r1y', '1Y'],
 ];
 
+// WHAT "TOP PERFORMING" MEANS depends on which question is being asked, and the two answers
+// disagree often enough to be worth separating:
+//
+//   a return window  what the sector DID — the median member's move over that period
+//   avgScore         what the sector IS — the average Portfolio-Health score of its members,
+//                    which blends technical, fundamental and momentum and says nothing about
+//                    the last three months on its own
+//   breadth          how MANY members are participating, which is what distinguishes a sector
+//                    move from two names carrying an index
+//
+// A sector can top the 3M table on a score of 48 (a hard bounce in weak businesses) or sit
+// mid-table on a score of 62. Both orderings are legitimate; the column head picks between them.
+const SC_SORTS = {
+  avgScore: 'Score',
+  breadth: 'Breadth 3M',
+  ...Object.fromEntries(SC_WINDOWS.map(([k, l]) => [k, `${l} median`])),
+};
+
+/** The number a given sort key ranks on, or null when this industry has none. */
+function scSortValue(row, key) {
+  if (key === 'avgScore') return row.avgScore ?? null;
+  if (key === 'breadth') return row.windows?.r3m?.breadthPct ?? null;
+  return row.windows?.[key]?.median ?? null;
+}
+
 function IndustryScorecardPanel() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -7176,16 +7201,24 @@ function IndustryScorecardPanel() {
   const industries = data?.industries || [];
   const market = data?.market || null;
 
-  // Sorted by the window you clicked, worst-measured last. An industry with no data for that
-  // window sinks rather than sorting as if it were zero.
+  // BEST FIRST, ALWAYS DESCENDING. The table's job is "which sector is leading", so the answer
+  // is the top row and never needs looking for. An industry with no figure for the chosen
+  // measure sinks to the bottom rather than sorting as if it were zero — "not measured" is not
+  // the same as "flat", and letting it sort as zero would drop it into the middle of the table
+  // among genuinely flat sectors.
   const sorted = [...industries].sort((a, b) => {
-    const av = a.windows?.[sortBy]?.median;
-    const bv = b.windows?.[sortBy]?.median;
+    const av = scSortValue(a, sortBy);
+    const bv = scSortValue(b, sortBy);
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
     if (bv == null) return -1;
     return bv - av;
   });
+
+  // The members panel splits stocks by a RETURN, so a sort on Score or Breadth — neither of
+  // which exists per stock — falls back to 3M. Without this, expanding a row while sorted by
+  // Score reads every stock's `undefined` and reports the whole sector as having no history.
+  const memberWindow = SC_WINDOWS.some(([k]) => k === sortBy) ? sortBy : 'r3m';
 
   const toggle = (name) => setOpen((prev) => {
     const next = new Set(prev);
@@ -7224,12 +7257,12 @@ function IndustryScorecardPanel() {
     );
   }
 
-  const th = (key, label) => (
+  const th = (key, label, hint) => (
     <th
       key={key}
       scope="col"
       onClick={() => setSortBy(key)}
-      title={`Sort by ${label} median`}
+      title={hint || `Rank the sectors by ${SC_SORTS[key] || label}, best first`}
       style={{ cursor: 'pointer', textAlign: 'right', whiteSpace: 'nowrap',
         color: sortBy === key ? 'var(--text)' : undefined,
         textDecoration: sortBy === key ? 'underline' : undefined }}
@@ -7254,7 +7287,14 @@ function IndustryScorecardPanel() {
         Each figure is the <strong>median return of that sector's Nifty 500 members</strong>, equal-weighted —
         what a typical stock in the sector did. Published sector indices are cap-weighted and will differ.
         <strong> Breadth</strong> is the share of members positive over 3 months: a strong median on thin
-        breadth means a few names are carrying it. Click a column head to sort; click a row to expand.
+        breadth means a few names are carrying it. Click a row to expand it.
+      </p>
+      <p style={{ margin: '0 0 12px', fontSize: 12.5, color: 'var(--text-secondary)' }}>
+        Ranked <strong>best first by {SC_SORTS[sortBy] || sortBy}</strong> — the leading sector is the
+        top row. Click any other column head to rank by that instead:{' '}
+        <span className="muted">
+          a return window for what a sector <em>did</em>, Score for the health of what is <em>in</em> it.
+        </span>
       </p>
 
       <div style={{ overflowX: 'auto' }}>
@@ -7262,17 +7302,19 @@ function IndustryScorecardPanel() {
           <thead>
             <tr>
               <th scope="col" style={{ width: 28 }}></th>
+              <th scope="col" style={{ width: 30, textAlign: 'right' }} title="Rank on the column currently sorted">#</th>
               <th scope="col">Industry</th>
               <th scope="col" style={{ textAlign: 'right' }} title="Members of this sector in the Nifty 500">N</th>
               {SC_WINDOWS.map(([k, l]) => th(k, l))}
-              <th scope="col" style={{ textAlign: 'right' }} title="Share of members positive over 3 months">Breadth 3M</th>
-              <th scope="col" style={{ textAlign: 'right' }} title="Average Portfolio-Health combined score across members">Score</th>
+              {th('breadth', 'Breadth 3M', 'Share of members positive over 3 months — click to rank by participation, widest first')}
+              {th('avgScore', 'Score', 'Average Portfolio-Health combined score across members — click to rank by the health of the sector’s businesses rather than by what they returned')}
               <th scope="col" style={{ textAlign: 'right' }} title="How many members you currently hold">Held</th>
             </tr>
           </thead>
           <tbody>
             {market && (
               <tr style={{ background: 'var(--surface-2, rgba(0,0,0,.03))', fontWeight: 600 }}>
+                <td></td>
                 <td></td>
                 <td>NIFTY 500 <span className="muted" style={{ fontWeight: 400 }}>· all sectors</span></td>
                 <td style={{ textAlign: 'right' }}>{market.count}</td>
@@ -7283,14 +7325,23 @@ function IndustryScorecardPanel() {
                 <td></td><td></td>
               </tr>
             )}
-            {sorted.map((row) => {
+            {sorted.map((row, i) => {
               const isOpen = open.has(row.industry);
               const b = row.windows?.r3m?.breadthPct;
+              const ranked = scSortValue(row, sortBy) != null;
               return (
                 <React.Fragment key={row.industry}>
                   <tr onClick={() => toggle(row.industry)} style={{ cursor: 'pointer' }}>
                     <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>
                       {isOpen ? '−' : '+'}
+                    </td>
+                    {/* The rank is what makes "top performing first" a statement the table makes
+                        rather than one the reader has to infer. Sectors with no figure for this
+                        measure sit at the bottom unnumbered — ranking them would imply they came
+                        last, when in fact they were not measured. */}
+                    <td style={{ textAlign: 'right', color: 'var(--text-muted)',
+                      fontWeight: ranked && i < 3 ? 700 : 400 }}>
+                      {ranked ? i + 1 : '—'}
                     </td>
                     <td><strong>{row.industry}</strong></td>
                     <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{row.count}</td>
@@ -7303,18 +7354,21 @@ function IndustryScorecardPanel() {
                         </td>
                       );
                     })}
-                    <td style={{ textAlign: 'right', color: b == null ? undefined : (b >= 60 ? 'var(--pos)' : b <= 40 ? 'var(--neg)' : undefined) }}>
+                    <td style={{ textAlign: 'right', fontWeight: sortBy === 'breadth' ? 700 : undefined,
+                      color: b == null ? undefined : (b >= 60 ? 'var(--pos)' : b <= 40 ? 'var(--neg)' : undefined) }}>
                       {b == null ? '—' : `${b}%`}
                     </td>
-                    <td style={{ textAlign: 'right' }}>{row.avgScore ?? '—'}</td>
+                    <td style={{ textAlign: 'right', fontWeight: sortBy === 'avgScore' ? 700 : undefined }}>
+                      {row.avgScore ?? '—'}
+                    </td>
                     <td style={{ textAlign: 'right' }}>
                       {row.heldCount ? <span style={{ color: 'var(--pos)', fontWeight: 700 }}>{row.heldCount}</span> : <span className="muted">—</span>}
                     </td>
                   </tr>
                   {isOpen && (
                     <tr>
-                      <td colSpan={SC_WINDOWS.length + 5} style={{ padding: '0 0 14px 28px', background: 'var(--surface-2, rgba(0,0,0,.015))' }}>
-                        <IndustryMembers row={row} sortBy={sortBy} />
+                      <td colSpan={SC_WINDOWS.length + 6} style={{ padding: '0 0 14px 28px', background: 'var(--surface-2, rgba(0,0,0,.015))' }}>
+                        <IndustryMembers row={row} sortBy={memberWindow} />
                       </td>
                     </tr>
                   )}
