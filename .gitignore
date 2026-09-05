@@ -49,3 +49,9 @@ Thumbs.db
 start-zta*.bat
 start-zta*.vbs
 restart-dev.ps1
+
+# Scan artifacts. The scanner downloads the constituent list from NSE and caches fundamental
+# scores beside itself; both are regenerated on the next run and are stale the day after. They
+# are market data, not source — market.db is where scan results are meant to live.
+engines/*_constituents.csv
+engines/fund_cache_*.json

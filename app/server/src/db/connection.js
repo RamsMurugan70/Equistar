@@ -1,4 +1,5 @@
 const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
 const config = require('../config/env');
 
 function openDatabase(filePath = config.dbPath) {
@@ -20,7 +21,12 @@ function openDatabase(filePath = config.dbPath) {
   // Failures are logged, not thrown. An instance whose market file is missing can still show
   // holdings, orders and P&L; only the scan-derived screens go quiet. Refusing to open the
   // database at all would take the whole app down over data it does not own.
-  if (config.marketDbPath) {
+  // Skipped when there is nothing to attach, and when the market file IS this connection's main
+  // database — which is how the hub's scanner runs. Attaching a file to itself under a second
+  // name is at best pointless and at worst a second write path into the same tables.
+  const attachable = config.marketDbPath
+    && path.resolve(config.marketDbPath) !== path.resolve(filePath);
+  if (attachable) {
     // SERIALIZED, and this is not optional. node-sqlite3 runs statements on a connection
     // concurrently by default, so without this the first query races the ATTACH and fails with
     // "no such table: universe_top_daily" — intermittently, and more often on a fast machine

@@ -1,8 +1,9 @@
 const https = require('https');
 const { openDatabase, allAsync, runAsync, getAsync, closeAsync } = require('../../db/connection');
+const { onlyWhenOwned } = require('../../db/marketSchema');
 
 // ── Schema ────────────────────────────────────────────────────────────────────
-async function ensureSchema() {
+const ensureSchema = onlyWhenOwned(async () => {
   const db = openDatabase();
   try {
     await runAsync(db, `
@@ -26,7 +27,7 @@ async function ensureSchema() {
   } finally {
     await closeAsync(db);
   }
-}
+});
 
 ensureSchema().catch((e) => console.error('corporateActions ensureSchema:', e.message));
 

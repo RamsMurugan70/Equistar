@@ -10,6 +10,7 @@
 // handshake. Cached in SQLite so a fetch failure never blocks parsing.
 const https = require('https');
 const { openDatabase, allAsync, getAsync, runAsync, closeAsync } = require('../../db/connection');
+const { onlyWhenOwned } = require('../../db/marketSchema');
 
 const CSV_URLS = [
   'https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv',
@@ -63,7 +64,7 @@ function fetchUrl(url, cookie, depth = 0) {
   });
 }
 
-async function ensureSchema(db) {
+const ensureSchema = onlyWhenOwned(async (db) => {
   await runAsync(db, `
     CREATE TABLE IF NOT EXISTS nse_symbol_master (
       symbol      TEXT PRIMARY KEY,
@@ -74,7 +75,7 @@ async function ensureSchema(db) {
       updated_at  TEXT
     )`);
   await runAsync(db, `CREATE INDEX IF NOT EXISTS idx_symmaster_norm ON nse_symbol_master (norm_name)`);
-}
+});
 
 async function refreshSymbolMaster() {
   const cookie = await nseCookies();

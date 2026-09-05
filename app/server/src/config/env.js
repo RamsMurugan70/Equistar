@@ -1,8 +1,17 @@
 const path = require('path');
-require('dotenv').config({ path: path.resolve(process.cwd(), '..', '.env') });
 
-const rootDir = path.resolve(__dirname, '..', '..');
-const dataDir = path.join(rootDir, '..', 'data');
+// The repo root, not the app directory. Inherited from the desktop app, where the server sat one
+// level below the data folder; here it sits two (EquiStar/app/server), so the old `rootDir/..`
+// resolved to EquiStar/app/data — a directory that does not exist. Instances never noticed
+// because the hub passes every path explicitly, but the scan did, and warned four times about a
+// market database it could not open while writing happily to the right one.
+const rootDir = path.resolve(__dirname, '..', '..');            // <repo>/app/server
+const repoRoot = path.resolve(rootDir, '..', '..');             // <repo>
+require('dotenv').config({ path: path.join(repoRoot, '.env') });
+
+const dataDir = process.env.DATA_DIR
+  ? path.resolve(repoRoot, process.env.DATA_DIR)
+  : path.join(repoRoot, 'data');
 
 // TWO DATABASES, and which one a table lives in is the whole tenancy model.
 //
@@ -19,13 +28,21 @@ const dataDir = path.join(rootDir, '..', 'data');
 // connection.js ATTACHes the market file, and because those tables do not exist in the
 // participant's own file, SQLite resolves the app's existing unqualified queries into the
 // attached one. No query in the app had to change.
+// Relative overrides resolve against the repo root, which is what a person typing
+// DB_PATH=data/app.db expects. The hub always passes an absolute path, so this matters only for
+// running the app by hand.
 const dbPath = process.env.DB_PATH
-  ? path.resolve(rootDir, '..', process.env.DB_PATH)
+  ? path.resolve(repoRoot, process.env.DB_PATH)
   : path.join(dataDir, 'app.db');
 
-const marketDbPath = process.env.MARKET_DB_PATH
-  ? path.resolve(rootDir, '..', process.env.MARKET_DB_PATH)
-  : path.join(dataDir, 'market.db');
+// An EXPLICITLY EMPTY value means "do not attach anything", which is how the scanner runs: it
+// opens the market database as its own main and has nothing to attach. Treating empty as unset
+// sent it back to the default and produced four warnings per scan about a file it did not need.
+const marketDbPath = process.env.MARKET_DB_PATH === ''
+  ? null
+  : (process.env.MARKET_DB_PATH
+    ? path.resolve(repoRoot, process.env.MARKET_DB_PATH)
+    : path.join(dataDir, 'market.db'));
 
 module.exports = {
   rootDir,

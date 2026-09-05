@@ -1,4 +1,5 @@
 const { openDatabase, allAsync, runAsync, getAsync, closeAsync } = require('../db/connection');
+const { onlyWhenOwned } = require('../db/marketSchema');
 
 async function withDatabase(work) {
   const db = openDatabase();
@@ -9,7 +10,7 @@ async function withDatabase(work) {
   }
 }
 
-async function ensureSchema(db) {
+const ensureSchema = onlyWhenOwned(async (db) => {
   await runAsync(db, `
     CREATE TABLE IF NOT EXISTS universe_scores (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,7 +111,7 @@ async function ensureSchema(db) {
   // Universe-aware indexes — created only after the column is guaranteed to exist above.
   await runAsync(db, 'CREATE INDEX IF NOT EXISTS idx_universe_scores_universe_date ON universe_scores (universe, scan_date)');
   await runAsync(db, 'CREATE INDEX IF NOT EXISTS idx_universe_top_daily_universe_date ON universe_top_daily (universe, scan_date)');
-}
+});
 
 // Replace the rows for one scan date (idempotent re-runs same day).
 // `universe` distinguishes NIFTY500 (default) from the MIDCAP/SMALLCAP/MICROCAP scans.
