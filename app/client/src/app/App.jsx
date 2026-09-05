@@ -7170,6 +7170,7 @@ const SC_WINDOWS = [
 // A sector can top the 3M table on a score of 48 (a hard bounce in weak businesses) or sit
 // mid-table on a score of 62. Both orderings are legitimate; the column head picks between them.
 const SC_SORTS = {
+  overall: 'overall performance',
   avgScore: 'Score',
   breadth: 'Breadth 3M',
   ...Object.fromEntries(SC_WINDOWS.map(([k, l]) => [k, `${l} median`])),
@@ -7177,6 +7178,7 @@ const SC_SORTS = {
 
 /** The number a given sort key ranks on, or null when this industry has none. */
 function scSortValue(row, key) {
+  if (key === 'overall') return row.overall?.value ?? null;
   if (key === 'avgScore') return row.avgScore ?? null;
   if (key === 'breadth') return row.windows?.r3m?.breadthPct ?? null;
   return row.windows?.[key]?.median ?? null;
@@ -7186,7 +7188,9 @@ function IndustryScorecardPanel() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [sortBy, setSortBy] = useState('r3m');
+  // Blended performance by default. Ranking on any single window puts sectors at the top that
+  // contradict themselves elsewhere in their own row, which reads as no order at all.
+  const [sortBy, setSortBy] = useState('overall');
   const [open, setOpen] = useState(() => new Set());
 
   function load() {
@@ -7291,9 +7295,11 @@ function IndustryScorecardPanel() {
       </p>
       <p style={{ margin: '0 0 12px', fontSize: 12.5, color: 'var(--text-secondary)' }}>
         Ranked <strong>best first by {SC_SORTS[sortBy] || sortBy}</strong> — the leading sector is the
-        top row. Click any other column head to rank by that instead:{' '}
+        top row.{' '}
         <span className="muted">
-          a return window for what a sector <em>did</em>, Score for the health of what is <em>in</em> it.
+          <strong>Overall</strong> averages a sector&apos;s five window medians, so leading it takes
+          holding up across periods rather than one strong quarter. Click any column head to rank by
+          that measure instead.
         </span>
       </p>
 
@@ -7305,6 +7311,7 @@ function IndustryScorecardPanel() {
               <th scope="col" style={{ width: 30, textAlign: 'right' }} title="Rank on the column currently sorted">#</th>
               <th scope="col">Industry</th>
               <th scope="col" style={{ textAlign: 'right' }} title="Members of this sector in the Nifty 500">N</th>
+              {th('overall', 'Overall', 'The average of this sector’s five window medians — click to rank by performance across all periods rather than by one of them')}
               {SC_WINDOWS.map(([k, l]) => th(k, l))}
               {th('breadth', 'Breadth 3M', 'Share of members positive over 3 months — click to rank by participation, widest first')}
               {th('avgScore', 'Score', 'Average Portfolio-Health combined score across members — click to rank by the health of the sector’s businesses rather than by what they returned')}
@@ -7318,6 +7325,7 @@ function IndustryScorecardPanel() {
                 <td></td>
                 <td>NIFTY 500 <span className="muted" style={{ fontWeight: 400 }}>· all sectors</span></td>
                 <td style={{ textAlign: 'right' }}>{market.count}</td>
+                <td style={{ textAlign: 'right' }}>{pct(market.overall?.value)}</td>
                 {SC_WINDOWS.map(([k]) => (
                   <td key={k} style={{ textAlign: 'right' }}>{pct(market.windows?.[k]?.median)}</td>
                 ))}
@@ -7345,6 +7353,13 @@ function IndustryScorecardPanel() {
                     </td>
                     <td><strong>{row.industry}</strong></td>
                     <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{row.count}</td>
+                    <td style={{ textAlign: 'right', ...tint(row.overall?.value),
+                      fontWeight: sortBy === 'overall' ? 700 : undefined }}
+                      title={row.overall
+                        ? `Average of ${row.overall.measured} of ${row.overall.of} window medians`
+                        : 'no window has enough history'}>
+                      {pct(row.overall?.value)}
+                    </td>
                     {SC_WINDOWS.map(([k]) => {
                       const w = row.windows?.[k];
                       return (
@@ -7367,7 +7382,7 @@ function IndustryScorecardPanel() {
                   </tr>
                   {isOpen && (
                     <tr>
-                      <td colSpan={SC_WINDOWS.length + 6} style={{ padding: '0 0 14px 28px', background: 'var(--surface-2, rgba(0,0,0,.015))' }}>
+                      <td colSpan={SC_WINDOWS.length + 7} style={{ padding: '0 0 14px 28px', background: 'var(--surface-2, rgba(0,0,0,.015))' }}>
                         <IndustryMembers row={row} sortBy={memberWindow} />
                       </td>
                     </tr>

@@ -31,6 +31,32 @@ const median = (xs) => {
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
 const r1 = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : null);
 
+/**
+ * One number for "how has this sector performed", across every window it has.
+ *
+ * WHY A BLEND AND NOT ONE WINDOW. Ranking on a single period puts sectors at the top that
+ * contradict themselves elsewhere in their own row — on this scan, ranking by 3 months makes
+ * Consumer Services second while it is down 27.6% over a year, and buries Metals & Mining at
+ * seventeenth while it is up 24.3%. Reading the row, that looks arbitrary, because a person
+ * ranking "performance" is weighing the whole row rather than one column of it. Averaging makes
+ * a sector hold up across periods to lead.
+ *
+ * THE LONG WINDOWS CARRY MORE WEIGHT, and that is a property rather than a bug: a year's return
+ * is simply a bigger number than a week's, so it moves the mean more. Normalising each window
+ * first would make a +2% week count as much as a +20% year, which is not what "performance"
+ * means to somebody reading the table. Stated here because it is the first thing to check if the
+ * order ever looks 1Y-dominated.
+ *
+ * Windows the sector has no figure for are skipped, not counted as zero — the same rule the
+ * per-window medians follow. `measured` says how many went in, so a sector ranked on two windows
+ * is not silently compared with one ranked on five.
+ */
+function overallOf(windows) {
+  const vals = WINDOWS.map((w) => windows[w]?.median).filter((v) => Number.isFinite(v));
+  if (!vals.length) return null;
+  return { value: r1(mean(vals)), measured: vals.length, of: WINDOWS.length };
+}
+
 /** Latest snapshot per portfolio → { NSE_SYMBOL: Set(portfolio) }. */
 async function heldBySymbol() {
   const held = new Map();
@@ -129,6 +155,7 @@ async function build({ universe = UNIVERSE } = {}) {
         industry: name,
         count: members.length,
         windows,
+        overall: overallOf(windows),
         avgScore: r1(mean(scores)),
         heldCount: stocks.filter((s) => s.heldBy.length).length,
         stocks,
@@ -147,6 +174,8 @@ async function build({ universe = UNIVERSE } = {}) {
         measured: vals.length,
       } : null;
     }
+
+    market.overall = overallOf(market.windows);
 
     return { universe, scanDate, windows: WINDOWS, industries, market };
   } finally {
