@@ -287,6 +287,10 @@ export function fetchStockInsight(symbol, force = false) {
   return request(`/api/recommendations/stock-insight?symbol=${encodeURIComponent(symbol)}${force ? '&force=1' : ''}`);
 }
 
+export function fetchIndustryScorecard(universe) {
+  return request(`/api/recommendations/industry-scorecard${universe ? `?universe=${encodeURIComponent(universe)}` : ''}`);
+}
+
 export function fetchNifty500Top(limit = 25, universe = 'NIFTY500') {
   return request(`/api/recommendations/nifty500-top?limit=${limit}&universe=${universe}`);
 }

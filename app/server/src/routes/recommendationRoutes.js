@@ -17,6 +17,7 @@ router.get('/nifty500-consistent', controller.nifty500Consistent);
 router.get('/nifty500-stock-position', controller.nifty500StockPosition);
 router.get('/nifty500-symbols', controller.nifty500Symbols);
 router.get('/stock-insight', controller.stockInsight);
+router.get('/industry-scorecard', controller.industryScorecard);
 router.post('/nifty500-scan', controller.nifty500Scan);
 
 module.exports = router;

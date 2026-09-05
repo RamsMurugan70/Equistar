@@ -304,7 +304,17 @@ async function stockInsight(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// Industry Scorecard — each NSE sector's return profile across 1W/1M/3M/6M/1Y, built from the
+// latest NIFTY 500 scan, with every member stock so the UI can expand a sector in place.
+async function industryScorecard(req, res, next) {
+  try {
+    const svc = require('../services/universe/industryScorecardService');
+    res.json(await svc.build({ universe: req.query.universe || undefined }));
+  } catch (e) { next(e); }
+}
+
 module.exports = {
+  industryScorecard,
   stockInsight,
   listRecommendations,
   addRecommendation,

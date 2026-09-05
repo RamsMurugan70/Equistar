@@ -138,7 +138,11 @@ def download_prices(symbols, json_mode):
         chunk = symbols[i:i + BATCH_SIZE]
         tickers = [f"{s}.NS" for s in chunk]
         try:
-            data = yf.download(tickers, period="1y", interval="1d", group_by="ticker",
+            # 2y, not 1y. A 1-year return needs the close ~252 sessions back, and with exactly
+            # one year of data that bar IS the first row — so the window is whatever the pull
+            # happened to start on, not a year. The extra year costs nothing on a batched
+            # download and makes R1Y an actual 1-year figure.
+            data = yf.download(tickers, period="2y", interval="1d", group_by="ticker",
                                auto_adjust=True, progress=False, threads=True)
         except Exception as e:
             log(f"  batch {i//BATCH_SIZE+1} failed: {e}", json_mode)
@@ -193,6 +197,11 @@ def run(args):
             r1w = None
             if len(close) > 5 and close.iloc[-6] > 0:
                 r1w = (close.iloc[-1] / close.iloc[-6] - 1) * 100
+            # 1-year return: 252 trading sessions back. Stays None for anything listed inside
+            # the last year rather than silently comparing against its IPO week.
+            r1y = None
+            if len(close) > 252 and close.iloc[-253] > 0:
+                r1y = (close.iloc[-1] / close.iloc[-253] - 1) * 100
             rows.append(dict(
                 Symbol=sym, Name=names.get(sym, sym), Industry=industries.get(sym, ""),
                 CMP=round(float(close.iloc[-1]), 2),
@@ -202,6 +211,7 @@ def run(args):
                 R1M=round(r1m, 1) if r1m is not None else None,
                 R3M=round(r3m, 1) if r3m is not None else None,
                 R6M=round(r6m, 1) if r6m is not None else None,
+                R1Y=round(r1y, 1) if r1y is not None else None,
                 EmaLadder=ladder, Ema50Slope=slope,
                 Components=len(valid),
             ))

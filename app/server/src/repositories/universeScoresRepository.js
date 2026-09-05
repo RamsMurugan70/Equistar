@@ -96,6 +96,12 @@ const ensureSchema = onlyWhenOwned(async (db) => {
     if (!names.includes('r1w')) {
       await runAsync(db, `ALTER TABLE ${table} ADD COLUMN r1w REAL`);
     }
+    // Added for the Industry Scorecard. Existing rows keep NULL — the scanner only started
+    // computing a 1-year return from the day this shipped, and a backfilled zero would read
+    // as "flat for a year" rather than "not measured".
+    if (!names.includes('r1y')) {
+      await runAsync(db, `ALTER TABLE ${table} ADD COLUMN r1y REAL`);
+    }
   }
   // Small/Mid/Micro-cap scanners share these tables, distinguished by `universe`.
   // Existing rows predate this column and default to NIFTY500 (backfilled explicitly
@@ -126,12 +132,12 @@ async function replaceScanRows(scanDate, rows, universe = 'NIFTY500') {
           db,
           `INSERT INTO universe_scores
             (universe, scan_date, symbol, name, industry, cmp, technical_score, fundamental_score,
-             momentum_score, combined_score, rsi, r1w, r1m, r3m, r6m, ema_ladder, ema50_slope, components)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             momentum_score, combined_score, rsi, r1w, r1m, r3m, r6m, r1y, ema_ladder, ema50_slope, components)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             universe, scanDate, r.Symbol, r.Name, r.Industry, r.CMP,
             r.Tech ?? null, r.Fund ?? null, r.Mom ?? null, r.Score ?? null,
-            r.RSI ?? null, r.R1W ?? null, r.R1M ?? null, r.R3M ?? null, r.R6M ?? null,
+            r.RSI ?? null, r.R1W ?? null, r.R1M ?? null, r.R3M ?? null, r.R6M ?? null, r.R1Y ?? null,
             r.EmaLadder ?? null, r.Ema50Slope ?? null, r.Components ?? null,
           ]
         );

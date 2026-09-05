@@ -50,6 +50,7 @@ import {
   fetchCostBasisOverrides,
   importCostBasisOverrides,
   deleteCostBasisOverride,
+  fetchIndustryScorecard,
   fetchNifty500Top,
   fetchExternalRecs,
   fetchNifty500Consistent,
@@ -7122,6 +7123,281 @@ function StockLookupsPage() {
 }
 
 // ─────────────────────────────────────────
+// INDUSTRY SCORECARD — every NSE sector's return profile, from the latest Nifty 500 scan
+// ─────────────────────────────────────────
+//
+// A TABLE, NOT CARDS. Twenty sectors across five time windows is a grid of a hundred numbers,
+// and the whole point is comparing them — which sector led over 3 months, which is rolling over
+// this week. Cards put each sector in its own box and make exactly that comparison hard.
+//
+// The number shown is a MEDIAN of the sector's members, equal-weighted. It answers "what did a
+// typical stock in this sector do", which is not what Nifty Metal or Nifty Bank report — those
+// are cap-weighted, so a few giants set them. Breadth is shown next to it because a +12% median
+// on 80% advancing and the same median on 45% advancing are different situations.
+function IndustryScorecardPage() {
+  return (
+    <PageShell title="Industry Scorecard" subtitle="How each NSE sector has moved, measured across the Nifty 500 stocks you scan">
+      <IndustryScorecardPanel />
+    </PageShell>
+  );
+}
+
+const SC_WINDOWS = [
+  ['r1w', '1W'], ['r1m', '1M'], ['r3m', '3M'], ['r6m', '6M'], ['r1y', '1Y'],
+];
+
+function IndustryScorecardPanel() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sortBy, setSortBy] = useState('r3m');
+  const [open, setOpen] = useState(() => new Set());
+
+  function load() {
+    setLoading(true);
+    fetchIndustryScorecard()
+      .then(setData)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }
+  useEffect(() => { load(); }, []);
+
+  const industries = data?.industries || [];
+  const market = data?.market || null;
+
+  // Sorted by the window you clicked, worst-measured last. An industry with no data for that
+  // window sinks rather than sorting as if it were zero.
+  const sorted = [...industries].sort((a, b) => {
+    const av = a.windows?.[sortBy]?.median;
+    const bv = b.windows?.[sortBy]?.median;
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return bv - av;
+  });
+
+  const toggle = (name) => setOpen((prev) => {
+    const next = new Set(prev);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    return next;
+  });
+
+  // Colour scales with size, so a +25% sector reads differently from a +2% one at a glance.
+  // Capped at ±20% because beyond that the tint is already saturated and more range only
+  // makes the middle of the table harder to tell apart.
+  const tint = (v) => {
+    if (v == null) return {};
+    const k = Math.min(Math.abs(v) / 20, 1);
+    const a = 0.07 + k * 0.20;
+    return {
+      background: v >= 0 ? `rgba(5,102,74,${a.toFixed(3)})` : `rgba(179,45,25,${a.toFixed(3)})`,
+      color: Math.abs(v) > 12 ? (v >= 0 ? 'var(--pos)' : 'var(--neg)') : 'inherit',
+      fontWeight: Math.abs(v) > 12 ? 700 : 600,
+    };
+  };
+  const pct = (v) => (v == null ? '—' : `${v > 0 ? '+' : ''}${v}%`);
+
+  if (loading) {
+    return (
+      <div className="panel" style={{ marginTop: 18 }}>
+        <p className="muted">Building the scorecard from the latest Nifty 500 scan…</p>
+      </div>
+    );
+  }
+  if (error) return <div className="panel" style={{ marginTop: 18 }}><p className="negative">{error}</p></div>;
+  if (!industries.length) {
+    return (
+      <div className="panel" style={{ marginTop: 18 }}>
+        <p className="muted">{data?.message || 'No scan data yet. Run a Nifty 500 scan from Recommendations first.'}</p>
+      </div>
+    );
+  }
+
+  const th = (key, label) => (
+    <th
+      key={key}
+      scope="col"
+      onClick={() => setSortBy(key)}
+      title={`Sort by ${label} median`}
+      style={{ cursor: 'pointer', textAlign: 'right', whiteSpace: 'nowrap',
+        color: sortBy === key ? 'var(--text)' : undefined,
+        textDecoration: sortBy === key ? 'underline' : undefined }}
+    >
+      {label}{sortBy === key ? ' ▾' : ''}
+    </th>
+  );
+
+  return (
+    <div className="panel" style={{ marginTop: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <h2 style={{ margin: 0 }}>🏭 Industry Scorecard</h2>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+          {industries.length} industries · {market?.count} stocks
+        </span>
+        {data?.scanDate && <span style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 'auto' }}>
+          scan {data.scanDate}
+        </span>}
+        <button type="button" onClick={load} style={{ background: 'transparent', border: '1px solid var(--border-md)', borderRadius: 6, padding: '4px 10px', fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer' }}>↻ Reload</button>
+      </div>
+      <p style={{ margin: '4px 0 12px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+        Each figure is the <strong>median return of that sector's Nifty 500 members</strong>, equal-weighted —
+        what a typical stock in the sector did. Published sector indices are cap-weighted and will differ.
+        <strong> Breadth</strong> is the share of members positive over 3 months: a strong median on thin
+        breadth means a few names are carrying it. Click a column head to sort; click a row to expand.
+      </p>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table className="data-table compact-table">
+          <thead>
+            <tr>
+              <th scope="col" style={{ width: 28 }}></th>
+              <th scope="col">Industry</th>
+              <th scope="col" style={{ textAlign: 'right' }} title="Members of this sector in the Nifty 500">N</th>
+              {SC_WINDOWS.map(([k, l]) => th(k, l))}
+              <th scope="col" style={{ textAlign: 'right' }} title="Share of members positive over 3 months">Breadth 3M</th>
+              <th scope="col" style={{ textAlign: 'right' }} title="Average Portfolio-Health combined score across members">Score</th>
+              <th scope="col" style={{ textAlign: 'right' }} title="How many members you currently hold">Held</th>
+            </tr>
+          </thead>
+          <tbody>
+            {market && (
+              <tr style={{ background: 'var(--surface-2, rgba(0,0,0,.03))', fontWeight: 600 }}>
+                <td></td>
+                <td>NIFTY 500 <span className="muted" style={{ fontWeight: 400 }}>· all sectors</span></td>
+                <td style={{ textAlign: 'right' }}>{market.count}</td>
+                {SC_WINDOWS.map(([k]) => (
+                  <td key={k} style={{ textAlign: 'right' }}>{pct(market.windows?.[k]?.median)}</td>
+                ))}
+                <td style={{ textAlign: 'right' }}>{market.windows?.r3m ? `${market.windows.r3m.breadthPct}%` : '—'}</td>
+                <td></td><td></td>
+              </tr>
+            )}
+            {sorted.map((row) => {
+              const isOpen = open.has(row.industry);
+              const b = row.windows?.r3m?.breadthPct;
+              return (
+                <React.Fragment key={row.industry}>
+                  <tr onClick={() => toggle(row.industry)} style={{ cursor: 'pointer' }}>
+                    <td style={{ textAlign: 'center', color: 'var(--text-muted)', fontWeight: 700 }}>
+                      {isOpen ? '−' : '+'}
+                    </td>
+                    <td><strong>{row.industry}</strong></td>
+                    <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{row.count}</td>
+                    {SC_WINDOWS.map(([k]) => {
+                      const w = row.windows?.[k];
+                      return (
+                        <td key={k} style={{ textAlign: 'right', ...tint(w?.median) }}
+                          title={w ? `median ${w.median}% · mean ${w.mean}% · best ${w.best}% · worst ${w.worst}% · ${w.measured} of ${row.count} measured` : 'not enough history'}>
+                          {pct(w?.median)}
+                        </td>
+                      );
+                    })}
+                    <td style={{ textAlign: 'right', color: b == null ? undefined : (b >= 60 ? 'var(--pos)' : b <= 40 ? 'var(--neg)' : undefined) }}>
+                      {b == null ? '—' : `${b}%`}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{row.avgScore ?? '—'}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      {row.heldCount ? <span style={{ color: 'var(--pos)', fontWeight: 700 }}>{row.heldCount}</span> : <span className="muted">—</span>}
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={SC_WINDOWS.length + 5} style={{ padding: '0 0 14px 28px', background: 'var(--surface-2, rgba(0,0,0,.015))' }}>
+                        <IndustryMembers row={row} sortBy={sortBy} />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+        Sectors follow the NSE industry classification carried in the Nifty 500 constituent list.
+        A stock with too little listing history for a window is left out of that window rather than
+        counted as flat — hover any figure for the count that went into it.
+      </p>
+    </div>
+  );
+}
+
+// Members of one sector, split by the window currently being sorted on. Leaders and laggards
+// side by side, because "who is carrying this sector and who is dragging it" is the question
+// that follows immediately from a sector-level number.
+function IndustryMembers({ row, sortBy }) {
+  const navigate = useNavigate();
+  const label = (SC_WINDOWS.find(([k]) => k === sortBy) || [, '3M'])[1];
+
+  const withVal = row.stocks.filter((s) => Number.isFinite(s[sortBy]));
+  const noVal = row.stocks.filter((s) => !Number.isFinite(s[sortBy]));
+  const up = withVal.filter((s) => s[sortBy] > 0).sort((a, b) => b[sortBy] - a[sortBy]);
+  const down = withVal.filter((s) => s[sortBy] <= 0).sort((a, b) => a[sortBy] - b[sortBy]);
+
+  const List = ({ title, rows, tone }) => (
+    <div style={{ flex: '1 1 320px', minWidth: 280 }}>
+      <h4 style={{ margin: '10px 0 6px', fontSize: '0.82rem', fontWeight: 600, color: tone }}>
+        {title} ({rows.length})
+      </h4>
+      {!rows.length && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>None over {label}.</p>}
+      {rows.length > 0 && (
+        <table className="data-table compact-table" style={{ fontSize: '0.84rem' }}>
+          <thead>
+            <tr>
+              <th scope="col">Stock</th>
+              <th scope="col" style={{ textAlign: 'right' }}>{label}</th>
+              <th scope="col" style={{ textAlign: 'right' }}>CMP</th>
+              <th scope="col" style={{ textAlign: 'right' }}>Score</th>
+              <th scope="col">Trend</th>
+              <th scope="col">Held</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((s) => (
+              <tr key={s.symbol}>
+                <td>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/stock-lookups?symbol=${encodeURIComponent(s.symbol)}`)}
+                    title={s.name}
+                    style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', fontWeight: 700, color: 'var(--link, inherit)', cursor: 'pointer', textDecoration: 'underline dotted' }}
+                  >{s.symbol}</button>
+                  <div className="muted" style={{ fontSize: 11.5 }}>{s.name}</div>
+                </td>
+                <td style={{ textAlign: 'right', fontWeight: 700, color: s[sortBy] >= 0 ? 'var(--pos)' : 'var(--neg)' }}>
+                  {s[sortBy] > 0 ? '+' : ''}{s[sortBy]}%
+                </td>
+                <td style={{ textAlign: 'right' }}>{s.cmp == null ? '—' : `₹${Number(s.cmp).toLocaleString('en-IN')}`}</td>
+                <td style={{ textAlign: 'right' }}>{s.score ?? '—'}</td>
+                <td style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                  {s.emaLadder ? s.emaLadder.replace(/_/g, ' ').toLowerCase() : '—'}
+                </td>
+                <td style={{ fontSize: 11.5 }}>
+                  {s.heldBy?.length ? <span style={{ color: 'var(--pos)', fontWeight: 700 }}>{s.heldBy.join(', ')}</span> : <span className="muted">—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+
+  return (
+    <div>
+      <p className="muted" style={{ fontSize: 12, margin: '10px 0 0' }}>
+        {row.industry} — {row.count} members, split by {label} return.
+        {noVal.length > 0 && ` ${noVal.length} without ${label} history: ${noVal.map((s) => s.symbol).join(', ')}.`}
+      </p>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+        <List title={`▲ Gainers over ${label}`} rows={up} tone="var(--pos)" />
+        <List title={`▼ Laggards over ${label}`} rows={down} tone="var(--neg)" />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────
 // APP SHELL
 // ─────────────────────────────────────────
 
@@ -7168,6 +7444,7 @@ export default function App() {
           <NavLink to="/portfolio-health">🏥 Portfolio Health</NavLink>
           <NavLink to="/orders">📋 Orders</NavLink>
           <NavLink to="/recommendations">💡 Recommendations</NavLink>
+          <NavLink to="/industry-scorecard">🏭 Industry Scorecard</NavLink>
           <NavLink to="/untracked-holdings">🔍 Untracked Holdings</NavLink>
           <NavLink to="/stock-lookups">🔍 Stock Sleuth</NavLink>
           <NavLink to="/ask-data">💬 Ask the Data</NavLink>
@@ -7193,6 +7470,7 @@ export default function App() {
           <Route path="/portfolio"     element={<PortfolioPage />} />
           <Route path="/orders"        element={<OrdersPage />} />
           <Route path="/recommendations" element={<RecommendationsPage />} />
+          <Route path="/industry-scorecard" element={<IndustryScorecardPage />} />
           <Route path="/untracked-holdings" element={<UntrackedHoldingsPage />} />
           <Route path="/stock-lookups" element={<StockLookupsPage />} />
           <Route path="/ask-data" element={<AskDataPage />} />
