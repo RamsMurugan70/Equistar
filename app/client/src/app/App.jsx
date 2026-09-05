@@ -3319,6 +3319,10 @@ function Nifty500TopPanel({ onAddRec, universe = 'NIFTY500', title = 'Nifty 500 
   }
 
   const running = !!data?.status?.running;
+  // The scan belongs to whoever owns the shared market file — the admin's hub, not a
+  // participant's instance. The server says which this is; older responses without the flag are
+  // treated as allowed, so a stand-alone run of the app keeps its button.
+  const canScan = data?.status?.canScan !== false;
   const rows = data?.rows || [];
 
   return (
@@ -3334,11 +3338,18 @@ function Nifty500TopPanel({ onAddRec, universe = 'NIFTY500', title = 'Nifty 500 
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {running && <span style={{ fontSize: 13, color: '#9a5b06', fontWeight: 600 }}>⏳ scan running…</span>}
-          <button type="button" onClick={scanNow} disabled={running}
-            style={{ background: 'transparent', color: 'var(--primary,#1355a8)', border: '1px solid var(--primary,#1355a8)',
-              borderRadius: 6, padding: '5px 12px', fontSize: 13, fontWeight: 600, cursor: running ? 'not-allowed' : 'pointer' }}>
-            🔍 Scan now
-          </button>
+          {canScan ? (
+            <button type="button" onClick={scanNow} disabled={running}
+              style={{ background: 'transparent', color: 'var(--primary,#1355a8)', border: '1px solid var(--primary,#1355a8)',
+                borderRadius: 6, padding: '5px 12px', fontSize: 13, fontWeight: 600, cursor: running ? 'not-allowed' : 'pointer' }}>
+              🔍 Scan now
+            </button>
+          ) : (
+            <span style={{ fontSize: 12.5, color: '#656974' }}
+              title="One scan is run for everyone against the shared market data. Twenty-five separate scans would be twenty-five copies of the same 500 requests, and the shared result would be overwritten each time.">
+              scan run by the admin
+            </span>
+          )}
           <button type="button" onClick={load} disabled={loading}
             style={{ background: 'transparent', color: '#565a6b', border: '1px solid #656974',
               borderRadius: 6, padding: '5px 10px', fontSize: 13, cursor: 'pointer' }}>↻</button>
@@ -3422,7 +3433,7 @@ function Nifty500TopPanel({ onAddRec, universe = 'NIFTY500', title = 'Nifty 500 
         </div>
       ) : (
         <p style={{ fontSize: 14, color: '#656974', marginTop: 12 }}>
-          {loading ? 'Loading…' : running ? 'First scan in progress — results appear here when it finishes.' : `No scan yet — click "Scan now" to run the first ${title.replace(/ Daily Top 25$/, '')} scan.`}
+          {loading ? 'Loading…' : running ? 'First scan in progress — results appear here when it finishes.' : canScan ? `No scan yet — click "Scan now" to run the first ${title.replace(/ Daily Top 25$/, '')} scan.` : 'No scan yet — your admin runs it once for everyone, and the results appear here.'}
         </p>
       )}
 

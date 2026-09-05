@@ -26,8 +26,22 @@
 const app = require('./app');
 const config = require('./config/env');
 
-app.listen(config.port, () => {
-  console.log(`EquiStar instance listening on http://localhost:${config.port}`);
+// LOOPBACK ONLY, and this is a security boundary rather than a preference.
+//
+// An instance has NO AUTHENTICATION OF ITS OWN. It trusts the hub completely: the hub checks the
+// session, decides whose instance this is, and proxies. So anything that can open this port has
+// that participant's whole app — holdings, orders, the broker setup screen — with no sign-in.
+//
+// app.listen(port) without a host binds every interface, which on a cloud VM means the open
+// internet the moment a firewall rule is added or the box is run outside Docker. Naming the host
+// makes the isolation a property of the process rather than of the network in front of it.
+//
+// HOST is overridable for the case where the app is run stand-alone rather than by the hub, and
+// somebody wants to reach it from another machine on their own network.
+const host = process.env.HOST || '127.0.0.1';
+
+app.listen(config.port, host, () => {
+  console.log(`EquiStar instance listening on http://${host}:${config.port}`);
 
   // Schema only. A write path that names a column the table lacks fails at INSERT time, and an
   // import that throws mid-save looks identical to one that found nothing new.

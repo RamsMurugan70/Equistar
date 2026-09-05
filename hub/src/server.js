@@ -71,14 +71,52 @@ const fail = (res, e) => res.status(
 ).json({ error: e.message, code: e.code || 'ERROR' });
 
 // ── Session ──────────────────────────────────────────────────────────────────
+//
+// HOW MANY PASSWORD CHECKS MAY RUN AT ONCE. Not a rate limit, and deliberately not one.
+//
+// scrypt is memory-hard on purpose: each check costs ~32 MB and ~100 ms, which is what makes a
+// stolen hash expensive to crack. Unthrottled that becomes a lever — a few dozen simultaneous
+// attempts allocate a gigabyte on a box already running an app process per participant, and the
+// machine falls over without anybody guessing a single password. A published URL is found by
+// scanners on its own; certificate transparency logs list every hostname a certificate is issued
+// for, so "nobody knows the address" is not a defence.
+//
+// A CAP ON CONCURRENCY RATHER THAN ON ATTEMPTS, because the usual per-IP counter is wrong here:
+// a workshop room shares one public address, so ten people signing in together look exactly like
+// one attacker and would lock each other out. Per-account counters are worse — they let anyone
+// lock anyone else out by guessing badly on purpose. Queueing costs a legitimate signer-in a few
+// hundred milliseconds at most and can never refuse them.
+const LOGIN_SLOTS = 4;
+const LOGIN_QUEUE_MAX = 64;      // past this the box is under attack, not under load
+let loginActive = 0;
+const loginQueue = [];
+
+function releaseLoginSlot() {
+  const next = loginQueue.shift();
+  if (next) next();
+  else loginActive -= 1;
+}
+
+function takeLoginSlot() {
+  if (loginActive < LOGIN_SLOTS) { loginActive += 1; return Promise.resolve(true); }
+  if (loginQueue.length >= LOGIN_QUEUE_MAX) return Promise.resolve(false);
+  return new Promise((resolve) => loginQueue.push(() => resolve(true)));
+}
+
 app.post('/hub/api/login', async (req, res) => {
+  const got = await takeLoginSlot();
+  if (!got) {
+    return res.status(503).json({
+      error: 'Too many sign-ins at once. Wait a moment and try again.', code: 'BUSY',
+    });
+  }
   try {
     const { sessionId, participant } = await accounts.authenticate(
       req.body?.loginId, req.body?.password,
       { userAgent: req.get('user-agent'), ip: req.ip });
     res.cookie(COOKIE, sessionId, cookieOptions);
     res.json({ participant });
-  } catch (e) { fail(res, e); }
+  } catch (e) { fail(res, e); } finally { releaseLoginSlot(); }
 });
 
 app.post('/hub/api/logout', async (req, res) => {

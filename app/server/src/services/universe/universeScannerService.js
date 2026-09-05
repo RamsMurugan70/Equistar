@@ -6,6 +6,7 @@ const universeScoresRepository = require('../../repositories/universeScoresRepos
 const portfolioRepository = require('../../repositories/portfolioRepository');
 const { resolveNseSymbol } = require('../portfolio/portfolioService');
 const { openDatabase, allAsync, closeAsync } = require('../../db/connection');
+const { ownsMarketData } = require('../../db/marketSchema');
 
 const ENGINES = require('../../config/engines');
 
@@ -50,7 +51,10 @@ const scanStates = Object.fromEntries(UNIVERSES.map((u) => [u,
   { running: false, startedAt: null, lastError: null, lastFinishedAt: null, trigger: null }]));
 
 function getScanStatus(universe = 'NIFTY500') {
-  return { ...scanStates[universe] };
+  // `canScan` tells the page whether to offer the button at all. A participant's instance reads
+  // the shared market file but must not write it, and a button that always fails is worse than
+  // no button — it reads as the app being broken.
+  return { ...scanStates[universe], canScan: ownsMarketData() };
 }
 
 function _runScanner(script, args, timeoutMs) {
@@ -75,6 +79,22 @@ function _runScanner(script, args, timeoutMs) {
 }
 
 async function runScan({ refreshFundamentals = false, trigger = 'manual', universe = 'NIFTY500' } = {}) {
+  // ONLY THE PROCESS THAT OWNS THE MARKET FILE MAY SCAN INTO IT.
+  //
+  // A participant's instance ATTACHes market.db, so its unqualified writes land in the SHARED
+  // file — replaceScanRows would DELETE that day's rows for all twenty-five people and refill
+  // them from its own run. Worse, each scan is five hundred requests to Yahoo from one server
+  // address; a handful of participants pressing the same button gets that address rate-limited
+  // and leaves everybody's Top 25 and Industry Scorecard empty at once.
+  //
+  // The hub's scanner runs with MARKET_DB_PATH unset — market.db IS its main database — so it
+  // owns the data and passes. The same predicate already decides who may create these tables.
+  if (!ownsMarketData()) {
+    throw Object.assign(
+      new Error('The scan is run once for everyone by the admin, not per participant. '
+        + 'Ask them to run it from the admin page; the result appears here as soon as it lands.'),
+      { code: 'SCAN_NOT_OWNER' });
+  }
   if (!UNIVERSES.includes(universe)) throw new Error(`Unknown universe "${universe}"`);
   if (scanStates[universe].running) throw new Error(`A ${universe} scan is already running.`);
   scanStates[universe] = { ...scanStates[universe], running: true, startedAt: new Date().toISOString(), lastError: null, trigger };

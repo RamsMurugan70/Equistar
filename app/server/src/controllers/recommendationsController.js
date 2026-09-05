@@ -83,9 +83,21 @@ async function nifty500Scan(req, res, next) {
     if (!universeScannerService.UNIVERSES.includes(universe)) {
       return res.status(400).json({ error: `Unknown universe "${universe}"` });
     }
+    // Refused synchronously, before the fire-and-forget below. runScan guards itself too, but a
+    // rejected promise there would be swallowed by the .catch and this would still answer
+    // "started: true" — telling a participant a scan is running when nothing is.
+    const status = universeScannerService.getScanStatus(universe);
+    if (!status.canScan) {
+      return res.status(403).json({
+        error: 'The scan is run once for everyone by the admin, not per participant. Ask them to '
+          + 'run it; the result appears here as soon as it lands.',
+        code: 'SCAN_NOT_OWNER',
+        status,
+      });
+    }
     universeScannerService.runScan({ refreshFundamentals, trigger: 'manual', universe })
       .catch((e) => console.error(`${universe} manual scan failed:`, e.message));
-    res.json({ started: true, status: universeScannerService.getScanStatus(universe) });
+    return res.json({ started: true, status: universeScannerService.getScanStatus(universe) });
   } catch (error) { next(error); }
 }
 
