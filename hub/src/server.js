@@ -120,6 +120,18 @@ app.post('/hub/api/participants/:loginId/reset', requireAuth, requireAdmin, asyn
   catch (e) { fail(res, e); }
 });
 
+// Set a password directly, without the forced-change ceremony. Unlike /reset this leaves the
+// admin knowing a working password for that account — see the note on setPasswordDirect.
+app.post('/hub/api/participants/:loginId/password', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    res.json(await accounts.setPasswordDirect(
+      req.params.loginId,
+      req.body?.password,
+      { mustChange: !!req.body?.mustChange },
+      req.participant.login_id));
+  } catch (e) { fail(res, e); }
+});
+
 app.post('/hub/api/participants/:loginId/disabled', requireAuth, requireAdmin, async (req, res) => {
   try {
     res.json(await accounts.setDisabled(

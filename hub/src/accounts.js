@@ -98,6 +98,38 @@ async function resetPassword(loginId, actor) {
   return { loginId: row.login_id, password };
 }
 
+/**
+ * Sets a participant's password to something the admin chose, optionally without forcing a
+ * change on next sign-in.
+ *
+ * WHAT THIS GIVES UP, stated plainly because it is the whole difference from resetPassword():
+ * afterwards the admin knows a working password for that account. The generated-password flow
+ * exists so that nobody but the participant ever knows their password — the temporary one dies
+ * the moment they replace it. This deliberately breaks that, which is exactly what makes it
+ * useful for testing and exactly why it is worth thinking about before using it on a real
+ * participant. Every use is written to the audit log with the admin's name.
+ *
+ * Sessions are still ended. Whatever the reason for changing someone's password, leaving their
+ * existing sessions alive means the change did not actually take effect anywhere.
+ */
+async function setPasswordDirect(loginId, password, { mustChange = false } = {}, actor) {
+  const row = await byLogin(loginId);
+  if (!row) throw Object.assign(new Error('No such participant.'), { code: 'NOT_FOUND' });
+  const pw = String(password || '');
+  if (pw.length < 8) {
+    throw Object.assign(new Error('Pick a password of at least 8 characters.'), { code: 'WEAK' });
+  }
+
+  const { hash, salt } = await hashPassword(pw);
+  await db.run(
+    'UPDATE participants SET password_hash = ?, password_salt = ?, must_change_password = ? WHERE id = ?',
+    [hash, salt, mustChange ? 1 : 0, row.id]);
+  await db.run('DELETE FROM sessions WHERE participant_id = ?', [row.id]);
+  await db.audit(actor, 'participant.set_password', row.login_id,
+    `set directly by admin, mustChange=${mustChange ? 1 : 0}`);
+  return { loginId: row.login_id, mustChangePassword: !!mustChange };
+}
+
 async function setDisabled(loginId, disabled, actor) {
   const row = await byLogin(loginId);
   if (!row) throw Object.assign(new Error('No such participant.'), { code: 'NOT_FOUND' });
@@ -179,6 +211,6 @@ async function changePassword(participantId, currentPassword, newPassword) {
 }
 
 module.exports = {
-  list, create, resetPassword, setDisabled, authenticate, sessionUser, endSession,
+  list, create, resetPassword, setPasswordDirect, setDisabled, authenticate, sessionUser, endSession,
   changePassword, byLogin, shape, generatePassword,
 };

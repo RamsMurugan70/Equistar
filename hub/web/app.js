@@ -190,6 +190,51 @@ async function renderAdmin(participant) {
               el('p', { className: 'muted' }, 'Their old password and every open session stopped working.')));
           } catch (e) { out.replaceChildren(msg(e.message)); }
         };
+        // Set a password directly. Inline rather than a browser prompt(), which masks nothing,
+        // cannot be styled, and gives no room to say what the choice costs.
+        const setPw = el('button', { className: 'ghost sm' }, 'Set password');
+        setPw.onclick = () => {
+          const input = el('input', { type: 'text', placeholder: 'at least 8 characters',
+            autocomplete: 'off', spellcheck: false });
+          const keep = el('input', { type: 'checkbox' });
+          const apply = el('button', { className: 'sm' }, 'Set');
+          const cancel = el('button', { className: 'ghost sm' }, 'Cancel');
+          const box = el('div', { className: 'card' },
+            el('strong', {}, `Set a password for ${p.loginId}`),
+            el('p', { className: 'muted' },
+              'Shown as you type, because you are choosing it rather than reading it out. '
+              + 'Note that you will then know a working password for this account — the '
+              + 'generated-password flow exists so that nobody but the participant does.'),
+            el('div', { className: 'row' },
+              el('div', { className: 'grow' }, input),
+              apply, cancel),
+            el('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:10px' },
+              keep, el('span', { className: 'muted' },
+                'Still make them change it at next sign-in')));
+          apply.onclick = async () => {
+            apply.disabled = true;
+            try {
+              await api(`/hub/api/participants/${p.loginId}/password`, {
+                method: 'POST',
+                body: { password: input.value, mustChange: keep.checked },
+              });
+              out.replaceChildren(msg(
+                `Password set for ${p.loginId}. Any session they had open is now signed out.`, 'ok'));
+              reload();
+            } catch (e) {
+              box.append(msg(e.message));
+              apply.disabled = false;
+            }
+          };
+          cancel.onclick = () => out.replaceChildren();
+          out.replaceChildren(box);
+          // The message area sits in the panel ABOVE the participants table, so a form opened
+          // from a table row appears off-screen behind you. Without this the button reads as
+          // doing nothing at all.
+          box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          input.focus();
+        };
+
         const toggle = el('button', { className: p.disabled ? 'ghost sm' : 'danger sm' },
           p.disabled ? 'Enable' : 'Disable');
         toggle.onclick = async () => {
@@ -200,7 +245,7 @@ async function renderAdmin(participant) {
             reload();
           } catch (e) { out.replaceChildren(msg(e.message)); }
         };
-        actions.append(reset, ' ', toggle);
+        actions.append(reset, ' ', setPw, ' ', toggle);
         if (inst.running) {
           const stop = el('button', { className: 'ghost sm' }, 'Stop app');
           stop.onclick = async () => {
