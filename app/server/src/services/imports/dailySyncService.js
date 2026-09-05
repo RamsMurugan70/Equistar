@@ -30,6 +30,12 @@ const ledger = require('../../repositories/captureLedgerRepository');
 const { openDatabase, allAsync, closeAsync } = require('../../db/connection');
 const PF = require('../../config/portfolios');
 
+// Never throws: a broker whose key will not build a login URL simply has none, and the card says
+// so rather than taking the page down.
+function loginUrlFor(service) {
+  try { return service.getLoginUrl(); } catch { return null; }
+}
+
 // Capture is deliberately all-segment (cash AND F&O). The equity app only displays the equity
 // side, but the same broker call returns both, and filtering at capture time would leave the
 // F&O book in Optix quietly missing the very days this job exists to protect.
@@ -56,10 +62,18 @@ function connectionStatus() {
       expiresAt: s.expiresAt || null,
       loginAt: s.loginAt || null,
       hasApiKey: !!s.hasApiKey,
+      // Supplied so the page can offer a REAL LINK. It previously fetched this URL on click and
+      // then called window.open — but a popup opened after an await is blocked by the browser,
+      // the user-activation window having closed, so the button silently did nothing at all.
+      loginUrl: s.hasApiKey ? loginUrlFor(service) : null,
       // Told apart deliberately: a missing API key is a setup problem needing .env, while an
       // expired session just needs today's login. The fix is different, so the message is too.
       reason: s.connected ? null
-        : (!s.hasApiKey ? 'API key not configured in .env' : 'Not logged in today'),
+        // Not ".env" any more: keys are per-participant and entered on the Brokers page. The
+        // old wording told a participant to edit a file on a server they cannot reach.
+        : (!s.hasApiKey
+          ? 'No API key saved yet — add it on the Brokers page'
+          : 'Not connected today — use Connect on the Brokers page'),
     };
   });
 }
@@ -268,7 +282,9 @@ async function runDailySync({ trigger = 'manual', tradeDate } = {}) {
       // goes missing: no rows, no error, nothing to notice later.
       const detail = status.hasApiKey
         ? `${broker.label} not connected — log in to capture this day`
-        : `${broker.label} API key missing from .env`;
+        // Not ".env": keys are per-participant now and entered on the Brokers page. The old
+        // wording told a participant to edit a file on a server they cannot reach.
+        : `${broker.label} has no API key yet — add it on the Brokers page`;
       for (const kind of ledger.KINDS) {
         await ledger.record({ tradeDate: date, portfolio: broker.portfolio, kind,
           status: 'FAILED', rows: 0, detail });

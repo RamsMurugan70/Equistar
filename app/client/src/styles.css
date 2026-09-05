@@ -1517,3 +1517,21 @@ a[role="button"], .btn-link, a.btn {
 .tips { margin: 4px 0 0; font-size: .86rem; }
 .tips dt { font-weight: 600; margin-top: 10px; }
 .tips dd { margin: 3px 0 0; color: var(--text-secondary, #565a6b); }
+
+/* Once the keys are saved, logging in is the only thing left to do — so it is the loudest thing
+   on the card. It used to be a small button below a large blue link to the broker's developer
+   console, and people clicked the console, which starts no login at all. */
+.connect-now {
+  display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  padding: 14px 16px; border-radius: 9px;
+  background: #f0f7f4; border: 1px solid #bfe0d2;
+}
+.connect-now strong { display: block; margin-bottom: 2px; }
+.connect-now p { margin: 0; }
+.button-link.big { padding: 12px 20px; font-size: .95rem; white-space: nowrap; }
+
+/* The one-time broker setup, collapsed once it is done. Its links are for configuring an app at
+   the broker, not for logging in, and conflating the two cost an afternoon. */
+.setup-steps summary { cursor: pointer; font-size: .88rem; color: var(--text-secondary, #565a6b); }
+.setup-steps[open] summary { margin-bottom: 8px; }
+.setup-steps ol { margin: 0; }

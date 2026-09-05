@@ -15,6 +15,12 @@ const router = express.Router();
 
 const serviceFor = (broker) => (broker === 'zerodha' ? kiteService : breezeService);
 
+// Never throws: a broker whose key will not build a URL simply has none, and the page says so
+// rather than failing the whole screen.
+function loginUrlFor(broker) {
+  try { return serviceFor(broker).getLoginUrl(); } catch { return null; }
+}
+
 /** Everything both screens need: names, keys, sessions, and the guidance around them. */
 async function state(req) {
   const [names, stored, configured] = await Promise.all([
@@ -34,6 +40,11 @@ async function state(req) {
       ...s,
       accountName: names[s.broker],
       redirectUrl: catalog.redirectUrlFor(req, s.broker),
+      // Built here so Connect can be a plain link rather than a scripted window.open. The
+      // browser blocks a popup opened after an await — the user-activation window has closed by
+      // then — which made Connect do nothing at all, silently. A real anchor is never blocked.
+      // Only for a broker with keys: the URL is built from the stored API key.
+      loginUrl: s.configured ? loginUrlFor(s.broker) : null,
       session: sessions[s.broker] || null,
     })),
   };

@@ -6270,9 +6270,22 @@ function ConnectionCard({ conn, onConnected }) {
               login flow is not offered for it. */}
           {conn.hasApiKey && (
             <div className="ds-connect">
-              <button type="button" className="ds-btn" onClick={openLogin}>
+              {/* A REAL LINK. This used to fetch the login URL and then call window.open, but a
+                  popup opened after an await is blocked — the browser's user-activation window
+                  has closed by then — so the button silently did nothing and the broker was
+                  never reached. The URL now arrives with the page data. */}
+              <a
+                className="ds-btn"
+                href={conn.loginUrl || '#'}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => {
+                  if (!conn.loginUrl) { e.preventDefault(); setError('No login URL — save your API key on the Brokers page first.'); }
+                  else setOpened(true);
+                }}
+              >
                 {opened ? '↗ Reopen login' : '↗ Open broker login'}
-              </button>
+              </a>
               <input
                 className="ds-input"
                 placeholder={isBreeze ? 'Paste API session token' : 'Paste request_token'}

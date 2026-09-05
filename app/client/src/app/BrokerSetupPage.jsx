@@ -144,14 +144,6 @@ function BrokerCard({ broker, onSaved }) {
     } finally { setBusy(false); }
   };
 
-  const connect = async () => {
-    // The login URL is built server-side from the stored key, so the browser never sees the key.
-    const path = broker.broker === 'zerodha' ? '/api/kite/login-url' : '/api/breeze/login-url';
-    const r = await fetch(path).then((x) => x.json()).catch(() => null);
-    if (r?.loginUrl) window.open(r.loginUrl, '_blank', 'noopener');
-    else setNote({ kind: 'err', text: 'Could not build the login link. Check the key you saved.' });
-  };
-
   return (
     <article className="card broker-card">
       <header className="broker-head">
@@ -167,13 +159,37 @@ function BrokerCard({ broker, onSaved }) {
         </span>
       </header>
 
-      <ol className="steps">
-        {broker.setupSteps.map((s) => <li key={s}>{s}</li>)}
-      </ol>
+      {/* ONCE THE KEYS ARE IN, THE LOGIN IS THE ONLY THING LEFT TO DO, so it goes first and
+          loud. Previously the broker-console URL sat in the middle of the card as a large blue
+          link while Connect was a small button below the fold of attention — so people clicked
+          the console, landed on their app's settings page, and no login ever started. */}
+      {broker.configured && !connected && (
+        <div className="connect-now">
+          <div>
+            <strong>Step 2 — log in at {broker.label}</strong>
+            <p className="muted small">
+              This opens {broker.label} in a new tab. Sign in there and you will be sent straight
+              back here, connected.
+            </p>
+          </div>
+          <a className="button-link big" href={broker.loginUrl || '#'} target="_blank" rel="noreferrer"
+            onClick={(e) => { if (!broker.loginUrl) { e.preventDefault(); setNote({ kind: 'err', text: 'Save your API key first.' }); } }}>
+            🔑 Log in to {broker.label} ↗
+          </a>
+        </div>
+      )}
 
-      <p className="muted">
-        Broker console: <a href={broker.portalUrl} target="_blank" rel="noreferrer">{broker.portalUrl}</a>
-      </p>
+      <details className="setup-steps" open={!broker.configured}>
+        <summary>{broker.configured ? 'One-time setup at the broker (already done)' : 'Step 1 — one-time setup at the broker'}</summary>
+        <ol className="steps">
+          {broker.setupSteps.map((s) => <li key={s}>{s}</li>)}
+        </ol>
+        <p className="muted small">
+          Where you do that setup:{' '}
+          <a href={broker.portalUrl} target="_blank" rel="noreferrer">{broker.portalUrl}</a>
+          {' '}— this is <em>not</em> the login link.
+        </p>
+      </details>
 
       <div className="field">
         <span>Redirect URL — paste this into your broker app, exactly</span>
@@ -198,9 +214,6 @@ function BrokerCard({ broker, onSaved }) {
         </button>
         {broker.configured && (
           <>
-            <button type="button" className="button-link" onClick={connect}>
-              🔑 Connect ↗
-            </button>
             <button type="button" className="ghost danger" onClick={forget} disabled={busy}>
               Remove keys
             </button>

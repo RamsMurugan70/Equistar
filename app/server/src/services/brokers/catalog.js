@@ -72,11 +72,24 @@ const CATALOG = {
   },
 };
 
-/** The address a participant must register at their broker, built from the live request. */
+/**
+ * The address a participant registers at their broker, built from the live request.
+ *
+ * CARRIES THE PARTICIPANT'S NAME, so the hub can route the returning token by path instead of
+ * by cookie. A browser coming back from an external site does not reliably bring its session
+ * cookie — a different host spelling, a stricter SameSite default or a privacy setting is enough
+ * to lose it — and when it is lost the token is discarded and the person is told to sign in,
+ * having just signed in at their broker. Naming them in the URL removes the cookie from the
+ * path entirely. Each participant registers their own broker app, so each gets their own URL.
+ */
 function redirectUrlFor(req, broker) {
   const proto = req.get('x-forwarded-proto') || req.protocol;
   const host = req.get('x-forwarded-host') || req.get('host');
-  return `${proto}://${host}${CATALOG[broker]?.callbackPath || ''}`;
+  const owner = require('../../config/env').instanceOwner;
+  const path = CATALOG[broker]?.callbackPath || '';
+  // Without an owner this instance was started by hand rather than by the hub; the bare path is
+  // then correct, because there is no hub in front to route through.
+  return owner ? `${proto}://${host}/u/${owner}${path}` : `${proto}://${host}${path}`;
 }
 
 const list = () => Object.values(CATALOG);

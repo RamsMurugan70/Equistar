@@ -213,8 +213,86 @@ proxy.on('error', (err, _req, res) => {
   }
 });
 
+// A broker sending someone back after login, recognised by path — what happens next has to
+// differ from an ordinary page request.
+const isBrokerCallback = (p) => /^\/api\/(kite|breeze)\/callback$/.test(p);
+
+// ── Broker callbacks, addressed by participant ───────────────────────────────
+//
+// THE PARTICIPANT IS NAMED IN THE PATH, NOT IN A COOKIE, and that is the whole point.
+//
+// The desktop app has no accounts, so its callback is simply open: the broker redirects to it
+// and the token is exchanged. EquiStar has to know WHICH of twenty-five people a returning token
+// belongs to, and the obvious answer — read their session cookie — is the wrong one. The browser
+// is coming back from an external site, and any of a dozen ordinary things stops that cookie
+// travelling: a different host spelling (localhost versus 127.0.0.1 are separate origins), a
+// stricter SameSite default, a privacy setting, a fresh tab. When it does not travel the token
+// is discarded and the person is asked to sign in again, having just signed in at their broker.
+//
+// Since every participant registers their OWN broker app, each can register their own URL. The
+// path identifies them, no cookie is involved, and the flow becomes exactly as robust as the
+// desktop app's.
+//
+// Guessable, deliberately. Reaching it does nothing without a valid request token for that
+// participant's own broker app, which requires their broker login — and the worst it could do is
+// connect somebody's own account.
+// Express 5 dropped inline regex in route params, so the broker is validated in the handler.
+app.get('/u/:login/api/:broker/callback', async (req, res) => {
+  const login = String(req.params.login || '').toLowerCase();
+  if (!['kite', 'breeze'].includes(req.params.broker)) {
+    return res.status(404).type('html').send('<p>Unknown broker.</p>');
+  }
+  const participant = await accounts.byLogin(login).catch(() => null);
+
+  if (!participant || participant.disabled_at || participant.role === 'admin') {
+    console.log(`  ! broker callback for unknown participant "${login}"`);
+    return res.status(404).type('html').send('<p>No such account.</p>');
+  }
+
+  try {
+    if (!instances.isUp(participant.login_id)) await instances.start(participant);
+  } catch (e) {
+    return res.status(503).type('html')
+      .send(`<p>Could not start your app: ${e.message}</p>`);
+  }
+
+  const hasToken = !!(req.query.request_token || req.query.apisession || req.query.API_Session);
+  console.log(`  ◇ ${participant.login_id}: ${req.params.broker} callback`
+    + ` — ${hasToken ? 'carrying a token' : 'NO TOKEN in the redirect'}`);
+
+  // Rewritten to the path the instance serves, query string intact.
+  req.url = `/api/${req.params.broker}/callback${req.url.slice(req.url.indexOf('?') === -1 ? req.url.length : req.url.indexOf('?'))}`;
+  return proxy.web(req, res, { target: `http://127.0.0.1:${participant.instance_port}` });
+});
+
 app.use(async (req, res) => {
   if (!req.participant) {
+    // A BROKER CALLBACK ARRIVING UNAUTHENTICATED IS NOT A REDIRECT CASE.
+    //
+    // It carries a single-use request token. Sending it to the sign-in page throws that token
+    // away silently, and the person is asked to sign in immediately after signing in at their
+    // broker, with no hint that anything was lost. The obvious response is to click the same
+    // link again, which now fails at the broker too, because the token is spent.
+    //
+    // It happens when someone opens the broker's login URL directly instead of pressing Connect
+    // inside the app, so their browser holds no EquiStar session for the return trip to land in.
+    if (isBrokerCallback(req.path)) {
+      const broker = req.path.includes('kite') ? 'Zerodha' : 'ICICI Direct';
+      console.log(`  ! ${broker} callback arrived with no EquiStar session — token discarded`);
+      return res.status(401).type('html').send(`<!doctype html><meta charset="utf-8">
+<title>Sign in first</title>
+<style>body{font-family:system-ui,sans-serif;background:#f4f6f5;color:#1b1d28;display:grid;
+place-items:center;min-height:100vh;margin:0}.c{background:#fff;border:1px solid #dfe3e2;
+border-radius:10px;padding:28px 32px;max-width:460px}h1{font-size:1.15rem;margin:0 0 10px;
+color:#b32d19}p{margin:0 0 12px;color:#565a6b;font-size:.93rem;line-height:1.55}
+a{color:#05664a}</style>
+<div class="c"><h1>${broker} sent you back, but you were not signed in here</h1>
+<p>The login worked at ${broker}. EquiStar could not use it, because this browser held no
+EquiStar session for it to land in — and the one-time code has now been spent.</p>
+<p><strong>Sign in first, then start the connection from inside the app:</strong>
+<a href="/hub/">sign in</a>, open <em>Brokers</em>, and press <em>Connect</em> there. Opening the
+broker's login link directly will always fail this way.</p></div>`);
+    }
     // A browser asking for a page gets the sign-in screen; anything else gets an honest 401
     // rather than an HTML body it cannot parse.
     if (req.method === 'GET' && (req.get('accept') || '').includes('text/html')) {
@@ -247,6 +325,14 @@ app.use(async (req, res) => {
   if (wantsPage && !req.path.startsWith('/brokers')) {
     const done = await instanceSetupComplete(req.participant).catch(() => true);
     if (!done) return res.redirect('/brokers');
+  }
+
+  // Logged because a lost callback is otherwise invisible: nothing in the app records that a
+  // broker sent somebody back, so "I connected and nothing happened" had no evidence behind it.
+  if (isBrokerCallback(req.path)) {
+    const ok = req.query.status !== 'error' && (req.query.request_token || req.query.apisession);
+    console.log(`  ◇ ${req.participant.login_id}: broker callback ${req.path}`
+      + ` — ${ok ? 'carrying a token' : 'no token in the redirect'}`);
   }
 
   return proxy.web(req, res, { target: `http://127.0.0.1:${req.participant.instance_port}` });

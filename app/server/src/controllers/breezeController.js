@@ -25,7 +25,7 @@ async function handleCallback(req, res) {
 function callbackPage({ success, message }) {
   const colour = success ? '#16a34a' : '#dc2626';
   const icon   = success ? '✅' : '❌';
-  const appUrl = 'http://127.0.0.1:5175/portfolio';
+  const appUrl = '/brokers';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -45,7 +45,7 @@ function callbackPage({ success, message }) {
     .countdown { font-size: 12px; color: #9ca3af; margin-top: 12px; }
   </style>
   ${success ? `<script>
-    let s = 3;
+    let s = 5;
     function tick() {
       const el = document.getElementById('cd');
       if (el) el.textContent = s;
