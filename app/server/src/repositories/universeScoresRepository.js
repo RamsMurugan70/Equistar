@@ -117,6 +117,18 @@ const ensureSchema = onlyWhenOwned(async (db) => {
   // Universe-aware indexes — created only after the column is guaranteed to exist above.
   await runAsync(db, 'CREATE INDEX IF NOT EXISTS idx_universe_scores_universe_date ON universe_scores (universe, scan_date)');
   await runAsync(db, 'CREATE INDEX IF NOT EXISTS idx_universe_top_daily_universe_date ON universe_top_daily (universe, scan_date)');
+
+  // BY SYMBOL, not by date. The indexes above answer "what did the whole universe look like on
+  // this day", which is what the scan writes and the Top 25 reads. The other half of the traffic
+  // asks the opposite — "what has this one stock been doing" — for Stock Sleuth, the rank-movement
+  // batch and the held-symbol lookups, and none of it was indexed: each symbol scanned the ~29,000
+  // NIFTY500 rows. Ten lookups took 186ms before these and 11ms after, and a participant holding
+  // fifty names does fifty of them in one request.
+  //
+  // universe_bottom_daily already had its symbol index; universe_top_daily did not, which was an
+  // asymmetry rather than a decision.
+  await runAsync(db, 'CREATE INDEX IF NOT EXISTS idx_universe_scores_symbol_universe ON universe_scores (symbol, universe)');
+  await runAsync(db, 'CREATE INDEX IF NOT EXISTS idx_universe_top_daily_symbol ON universe_top_daily (symbol)');
 });
 
 // Replace the rows for one scan date (idempotent re-runs same day).
