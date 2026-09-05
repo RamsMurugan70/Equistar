@@ -245,6 +245,7 @@ async function revokeToken() {
 }
 
 module.exports = {
+  refreshCredentials,
   getLoginUrl,
   getSessionStatus,
   exchangeToken,
