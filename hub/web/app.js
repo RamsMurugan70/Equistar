@@ -116,12 +116,18 @@ function renderChangePassword(participant) {
     }
     submit.disabled = true;
     try {
-      await api('/hub/api/password', {
+      const r = await api('/hub/api/password', {
         method: 'POST',
         body: { currentPassword: current.input.value, newPassword: next.input.value },
       });
-      // Straight into the app: the participant came here to get in, not to read a receipt.
-      window.location.href = '/';
+      if (r.signedOut) {
+        // Back to the sign-in form, on purpose. Typing the new password once more while it is
+        // still in mind is what fixes it in memory — somebody carried straight into the app has
+        // never actually used the password they just chose.
+        renderLogin('Password changed. Sign in with your new password.');
+      } else {
+        window.location.href = '/';
+      }
     } catch (err) {
       out.replaceChildren(msg(err.message));
       submit.disabled = false;

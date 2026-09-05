@@ -11,6 +11,7 @@
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const path = require('path');
+const http = require('http');
 const httpProxy = require('http-proxy');
 const config = require('./config');
 const db = require('./db');
@@ -94,7 +95,16 @@ app.get('/hub/api/me', (req, res) => {
 app.post('/hub/api/password', requireAuth, async (req, res) => {
   try {
     await accounts.changePassword(req.participant.id, req.body?.currentPassword, req.body?.newPassword);
-    res.json({ ok: true });
+    // SIGNED OUT ON PURPOSE, and the page then asks them to sign in again with the new password.
+    //
+    // Partly because a password change should not leave the session it was made from alive —
+    // that is the same reason a reset ends every session. Mostly because typing the new password
+    // once more, immediately, while it is still in mind, is what fixes it in memory. A
+    // participant who sets a password and is carried straight into the app has never actually
+    // used it, and comes back tomorrow with nothing to type.
+    if (req.sessionId) await accounts.endSession(req.sessionId);
+    res.clearCookie(COOKIE, { ...cookieOptions, maxAge: undefined });
+    res.json({ ok: true, signedOut: true });
   } catch (e) { fail(res, e); }
 });
 
@@ -159,6 +169,33 @@ app.get('/hub/api/audit', requireAuth, requireAdmin, async (_req, res) => {
 app.use('/hub', express.static(path.join(__dirname, '..', 'web')));
 
 // ── Everything else goes to the participant's own instance ───────────────────
+/**
+ * Whether this participant has finished naming their accounts.
+ *
+ * Asked of their own instance rather than tracked in the hub: the answer lives in their database
+ * and the instance is the only thing that opens it. A second copy of that fact in hub.db would
+ * be one more thing to keep in step, and wrong the first time somebody edited one and not the
+ * other.
+ *
+ * A failure answers "yes, complete" so a hiccup here cannot lock somebody out of their own app.
+ */
+function instanceSetupComplete(participant) {
+  return new Promise((resolve) => {
+    const req = http.get({
+      host: '127.0.0.1', port: participant.instance_port, path: '/api/broker-setup',
+      timeout: 4000,
+    }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        try { resolve(!!JSON.parse(body).setupComplete); } catch { resolve(true); }
+      });
+    });
+    req.on('error', () => resolve(true));
+    req.on('timeout', () => { req.destroy(); resolve(true); });
+  });
+}
+
 const proxy = httpProxy.createProxyServer({ xfwd: true, ws: false });
 proxy.on('error', (err, _req, res) => {
   if (res && !res.headersSent) {
@@ -190,6 +227,19 @@ app.use(async (req, res) => {
   } catch (e) {
     return res.status(503).json({ error: `Could not start your app: ${e.message}`, code: 'INSTANCE_START_FAILED' });
   }
+
+  // FIRST RUN GOES TO BROKER SETUP, not the dashboard. Without a broker connected the app has
+  // nothing to show — every screen is a portfolio the participant has not given it yet — and a
+  // wall of empty panels teaches them the app is broken rather than unfinished.
+  //
+  // The redirect is only for a browser asking for a page. XHR keeps its normal answer, or the
+  // setup screen could not call the API it needs to complete the setup.
+  const wantsPage = req.method === 'GET' && (req.get('accept') || '').includes('text/html');
+  if (wantsPage && !req.path.startsWith('/brokers')) {
+    const done = await instanceSetupComplete(req.participant).catch(() => true);
+    if (!done) return res.redirect('/brokers');
+  }
+
   return proxy.web(req, res, { target: `http://127.0.0.1:${req.participant.instance_port}` });
 });
 

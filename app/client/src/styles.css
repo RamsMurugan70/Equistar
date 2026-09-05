@@ -1511,3 +1511,9 @@ a[role="button"], .btn-link, a.btn {
   text-align: left; cursor: pointer;
 }
 .signout:hover { color: var(--text-primary, #1b1d28); }
+
+/* Troubleshooting, collapsed until asked for. Each entry is a failure somebody actually hit. */
+.tips-toggle { align-self: flex-start; margin-top: 2px; }
+.tips { margin: 4px 0 0; font-size: .86rem; }
+.tips dt { font-weight: 600; margin-top: 10px; }
+.tips dd { margin: 3px 0 0; color: var(--text-secondary, #565a6b); }

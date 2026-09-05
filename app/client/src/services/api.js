@@ -642,3 +642,14 @@ export async function forgetBrokerKeys(broker) {
   if (!response.ok) throw Object.assign(new Error(body.error || 'Could not remove those keys.'), body);
   return body;
 }
+
+export async function saveAccountNames(names) {
+  const response = await fetch(`${API_BASE_URL}/api/broker-setup/names`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(names),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw Object.assign(new Error(body.error || 'Could not save those names.'), body);
+  return body;
+}

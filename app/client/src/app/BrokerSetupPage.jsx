@@ -1,11 +1,16 @@
-// Where a participant connects their own broker accounts.
+// Where a participant sets the app up: what to call their two accounts, and their own broker
+// API keys.
 //
-// The desktop app had no screen like this: it read one developer's keys from a .env file on the
-// machine it ran on. Every participant here has their own ICICI and Zerodha developer apps, so
-// the keys have to be entered, stored encrypted, and — the part that actually trips people up —
-// paired with a redirect URL registered at the broker that matches this server exactly.
+// This is the first screen a new participant sees after signing in, and stays the landing page
+// until at least one broker is connected — without that the app has nothing to show, and a wall
+// of empty panels teaches someone the app is broken rather than unfinished.
+//
+// The desktop app needed neither half: two portfolios named after the two people whose money
+// they held, and one developer's keys read from a .env file on the machine it ran on.
 import { useCallback, useEffect, useState } from 'react';
-import { fetchBrokerSetup, saveBrokerKeys, forgetBrokerKeys } from '../services/api';
+import {
+  fetchBrokerSetup, saveBrokerKeys, forgetBrokerKeys, saveAccountNames,
+} from '../services/api';
 
 function Copyable({ value }) {
   const [copied, setCopied] = useState(false);
@@ -47,16 +52,63 @@ function SecretInput({ label, value, onChange, placeholder }) {
           spellCheck={false}
           onChange={(e) => onChange(e.target.value)}
         />
-        <button
-          type="button"
-          onClick={() => setShown((s) => !s)}
-          aria-label={shown ? 'Hide' : 'Show'}
-          title={shown ? 'Hide' : 'Show'}
-        >
+        <button type="button" onClick={() => setShown((s) => !s)}
+          aria-label={shown ? 'Hide' : 'Show'} title={shown ? 'Hide' : 'Show'}>
           {shown ? '🙈' : '👁'}
         </button>
       </span>
     </label>
+  );
+}
+
+/** Step one: what these two accounts are called. */
+function AccountNames({ brokers, onSaved }) {
+  const byBroker = Object.fromEntries(brokers.map((b) => [b.broker, b]));
+  const [icici, setIcici] = useState(byBroker.icicidirect?.accountName || '');
+  const [zerodha, setZerodha] = useState(byBroker.zerodha?.accountName || '');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState(null);
+
+  const save = async () => {
+    setBusy(true); setNote(null);
+    try {
+      await saveAccountNames({ icicidirect: icici, zerodha });
+      setNote({ kind: 'ok', text: 'Saved.' });
+      await onSaved();
+    } catch (e) {
+      setNote({ kind: 'err', text: e.message });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <article className="card">
+      <h2>What should we call your accounts?</h2>
+      <p className="muted">
+        One per broker. These are the names you will see everywhere in the app, so use whatever
+        you actually call them — your own name, a family member&apos;s, &quot;long term&quot;.
+      </p>
+      <div className="broker-grid">
+        <label className="field">
+          <span>Your ICICI Direct account</span>
+          <input value={icici} maxLength={40} placeholder="e.g. Mine"
+            onChange={(e) => setIcici(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Your Zerodha account</span>
+          <input value={zerodha} maxLength={40} placeholder="e.g. Geetha"
+            onChange={(e) => setZerodha(e.target.value)} />
+        </label>
+      </div>
+      {note && <p className={note.kind === 'ok' ? 'note-ok' : 'note-err'}>{note.text}</p>}
+      <div className="broker-actions">
+        <button type="button" onClick={save} disabled={busy || (!icici.trim() && !zerodha.trim())}>
+          Save names
+        </button>
+        <span className="muted small">
+          You can change these later — your holdings move with the name.
+        </span>
+      </div>
+    </article>
   );
 }
 
@@ -65,16 +117,16 @@ function BrokerCard({ broker, onSaved }) {
   const [apiSecret, setApiSecret] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState(null);
+  const [showTips, setShowTips] = useState(false);
 
-  const session = broker.session || {};
-  const connected = !!session.connected;
+  const connected = !!broker.session?.connected;
 
   const save = async () => {
     setBusy(true); setNote(null);
     try {
       await saveBrokerKeys(broker.broker, apiKey, apiSecret);
       setApiKey(''); setApiSecret('');
-      setNote({ kind: 'ok', text: 'Saved. Now press Connect to log in to your broker.' });
+      setNote({ kind: 'ok', text: 'Saved. Now press Connect to log in at your broker.' });
       await onSaved();
     } catch (e) {
       setNote({ kind: 'err', text: e.message });
@@ -92,26 +144,35 @@ function BrokerCard({ broker, onSaved }) {
     } finally { setBusy(false); }
   };
 
+  const connect = async () => {
+    // The login URL is built server-side from the stored key, so the browser never sees the key.
+    const path = broker.broker === 'zerodha' ? '/api/kite/login-url' : '/api/breeze/login-url';
+    const r = await fetch(path).then((x) => x.json()).catch(() => null);
+    if (r?.loginUrl) window.open(r.loginUrl, '_blank', 'noopener');
+    else setNote({ kind: 'err', text: 'Could not build the login link. Check the key you saved.' });
+  };
+
   return (
     <article className="card broker-card">
       <header className="broker-head">
         <div>
-          <h2>{broker.label}</h2>
-          {broker.configured
-            ? <p className="muted">Key {broker.maskedKey} saved{broker.updatedAt ? ` on ${broker.updatedAt.slice(0, 10)}` : ''}</p>
-            : <p className="muted">Not set up yet.</p>}
+          <h2>{broker.accountName}</h2>
+          <p className="muted">
+            {broker.label}
+            {broker.configured ? ` · key ${broker.maskedKey}` : ' · no keys yet'}
+          </p>
         </div>
         <span className={`pill ${connected ? 'pill-on' : broker.configured ? 'pill-warn' : 'pill-off'}`}>
-          {connected ? 'Connected today' : broker.configured ? 'Keys saved — not connected' : 'No keys'}
+          {connected ? 'Connected today' : broker.configured ? 'Keys saved — not connected' : 'Not set up'}
         </span>
       </header>
 
       <ol className="steps">
-        {broker.steps.map((s) => <li key={s}>{s}</li>)}
+        {broker.setupSteps.map((s) => <li key={s}>{s}</li>)}
       </ol>
 
       <p className="muted">
-        Your broker console: <a href={broker.console} target="_blank" rel="noreferrer">{broker.console}</a>
+        Broker console: <a href={broker.portalUrl} target="_blank" rel="noreferrer">{broker.portalUrl}</a>
       </p>
 
       <div className="field">
@@ -137,63 +198,82 @@ function BrokerCard({ broker, onSaved }) {
         </button>
         {broker.configured && (
           <>
-            <a
-              className="button-link"
-              href={broker.broker === 'zerodha' ? '/api/kite/login-url' : '/api/breeze/login-url'}
-              onClick={async (e) => {
-                e.preventDefault();
-                // The login URL is built server-side from the stored key, so it is fetched
-                // rather than assembled here — the client never sees the key at all.
-                const path = broker.broker === 'zerodha' ? '/api/kite/login-url' : '/api/breeze/login-url';
-                const r = await fetch(path).then((x) => x.json()).catch(() => null);
-                if (r?.loginUrl) window.open(r.loginUrl, '_blank', 'noopener');
-                else setNote({ kind: 'err', text: 'Could not build the login link. Check the key you saved.' });
-              }}
-            >
-              Connect
-            </a>
+            <button type="button" className="button-link" onClick={connect}>
+              🔑 Connect ↗
+            </button>
             <button type="button" className="ghost danger" onClick={forget} disabled={busy}>
               Remove keys
             </button>
           </>
         )}
       </div>
+
+      {/* Every one of these is a failure somebody actually hit getting this working. Collapsed
+          by default so they do not shout at a participant for whom nothing has gone wrong yet. */}
+      <button type="button" className="ghost sm tips-toggle" onClick={() => setShowTips((s) => !s)}>
+        {showTips ? 'Hide' : 'If it does not work'}
+      </button>
+      {showTips && (
+        <dl className="tips">
+          {broker.tips.map(([q, a]) => (
+            <div key={q}>
+              <dt>{q}</dt>
+              <dd>{a}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
     </article>
   );
 }
 
 export default function BrokerSetupPage() {
-  const [brokers, setBrokers] = useState(null);
+  const [data, setData] = useState(null);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const data = await fetchBrokerSetup();
-      setBrokers(data.brokers);
+      setData(await fetchBrokerSetup());
       setError('');
     } catch (e) { setError(e.message); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
+  const firstRun = data && !data.setupComplete;
+
   return (
     <section className="page-shell">
       <div className="page-header">
         <div>
-          <h1>🔗 Brokers</h1>
+          <h1>{firstRun ? '👋 Set up your accounts' : '🔗 Brokers'}</h1>
           <p>
-            Connect your own ICICI Direct and Zerodha accounts. Your keys are stored encrypted in
-            your own database — nobody else on this server can read them, including the admin.
+            {firstRun
+              ? 'Two steps: name your accounts, then connect each broker with your own API keys. '
+                + 'Until a broker is connected there is nothing for the app to show you.'
+              : 'Your own ICICI Direct and Zerodha keys, stored encrypted in your own database — '
+                + 'nobody else on this server can read them, including the admin.'}
           </p>
         </div>
       </div>
 
       {error && <p className="note-err">{error}</p>}
-      {!brokers && !error && <p className="muted">Loading…</p>}
+      {!data && !error && <p className="muted">Loading…</p>}
 
-      <div className="broker-grid">
-        {brokers?.map((b) => <BrokerCard key={b.broker} broker={b} onSaved={load} />)}
-      </div>
+      {data && (
+        <>
+          <AccountNames brokers={data.brokers} onSaved={load} />
+          <div className="broker-grid">
+            {data.brokers.map((b) => <BrokerCard key={b.broker} broker={b} onSaved={load} />)}
+          </div>
+          {data.anyConnected && (
+            <p className="note-ok">
+              A broker is connected. <a href="/">Go to your dashboard →</a> Then use Daily Sync to
+              pull your holdings and trades in.
+            </p>
+          )}
+        </>
+      )}
     </section>
   );
 }
