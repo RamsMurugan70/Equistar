@@ -2916,10 +2916,43 @@ function OrdersPage() {
       if (!dateCount) throw new Error('No orders parsed.');
       const target = portfolio || 'Rams';
       setUploadState(`Uploading ${dateCount} dates into ${target}…`);
-      await uploadOrdersImport({ portfolio: target, fileName: file.name, ordersByDate });
+      const res = await uploadOrdersImport({ portfolio: target, fileName: file.name, ordersByDate });
       const [um, ud, ub] = await Promise.all([fetchOrdersMeta(), fetchOrders({ segment: 'equity', portfolio: target, symbol }), fetchBuyEvaluatorReport()]);
       setMeta(um); setData(ud); setBuyReport(ub); setPortfolio(target);
-      setUploadState(`Imported ${file.name} into ${target}.`);
+
+      // SAY WHAT THE IMPORT ACTUALLY DID, which this previously did not.
+      //
+      // The message used to be "Imported <file> into <portfolio>." regardless of the result, and
+      // the server's response was thrown away. Re-uploading a file already imported therefore
+      // looked EXACTLY like importing it for the first time — same words, same tone — so there
+      // was no way to tell the second attempt had done nothing. One participant uploaded nine
+      // tradebook exports in four minutes, several of them twice, because nothing on screen
+      // distinguished "41 trades added" from "all 41 were already here".
+      //
+      // The import itself was never the problem: it dedupes on trade id, then on the
+      // date/symbol/side/qty/price tuple, so a repeat upload is harmless. Only the reporting was
+      // wrong, and the cost was people repeating work they had already done.
+      const inserted = Number(res?.rowsInserted ?? 0);
+      const skipped  = Number(res?.rowsSkipped ?? 0);
+      const seen     = Number(res?.rowsSeen ?? (inserted + skipped));
+      const dates    = (res?.tradeDates || []).length;
+      const span     = dates ? ` across ${dates} trade date${dates === 1 ? '' : 's'}` : '';
+
+      if (inserted === 0 && skipped > 0) {
+        setUploadState(`Nothing new — all ${skipped} trade${skipped === 1 ? '' : 's'} in `
+          + `${file.name} were already in ${target}${span}. This file has been imported before; `
+          + `nothing was changed.`);
+      } else if (inserted > 0 && skipped > 0) {
+        setUploadState(`Added ${inserted} new trade${inserted === 1 ? '' : 's'} to ${target}${span} `
+          + `· ${skipped} were already there and were left alone.`);
+      } else if (inserted > 0) {
+        setUploadState(`Added ${inserted} new trade${inserted === 1 ? '' : 's'} to ${target}${span}.`);
+      } else {
+        // Nothing in, nothing skipped: the file parsed but produced no usable rows. Said plainly
+        // rather than reported as a success, which is what "Imported <file>" used to do.
+        setUploadState(`No trades were imported from ${file.name} — ${seen} row(s) were read but `
+          + `none could be used. Check that this is a Zerodha tradebook export.`);
+      }
     } catch (err) { setError(err.message); setUploadState(''); } finally { e.target.value = ''; }
   }
 
