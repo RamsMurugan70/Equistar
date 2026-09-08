@@ -663,6 +663,13 @@ async function getAsOfReport(portfolio, date) {
     portfolios.push({
       portfolio: name,
       holdings: holdings.map((h) => ({
+        // RESOLVED HERE, NOT IN THE CLIENT. The snapshot carries whatever code the broker used
+        // (ICICI's LAULAB, SHYMET), while every scan-derived lookup — the rank-movement batch,
+        // Stock Sleuth — is keyed by NSE symbol. Sending the mapping with the row means one
+        // implementation of it; re-deriving it in the browser would be a second copy that
+        // silently drifts, and the symptom would be a handful of holdings whose rank is blank
+        // for no visible reason.
+        nseSymbol: resolveNseSymbol(h.symbol) || h.symbol,
         symbol: h.symbol, sector: h.sector, quantity: h.quantity,
         avgCost: h.avgCost, ltp: h.ltp, invested: h.invested,
         currentValue: h.currentValue, pnl: h.pnl,

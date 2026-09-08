@@ -10,12 +10,29 @@ const { ownsMarketData } = require('../../db/marketSchema');
 
 const ENGINES = require('../../config/engines');
 
-// Every universe this service can scan. NIFTY500 uses the original dedicated
-// script; MIDCAP/SMALLCAP/MICROCAP share capscanner.py via --universe.
-const UNIVERSES = ['NIFTY500', 'MIDCAP', 'SMALLCAP', 'MICROCAP'];
+// Every universe this service can scan. NIFTY500 has its own dedicated script; all the others
+// share capscanner.py via --universe.
+//
+// Cap-size universes carve the market by size; sector universes carve it by industry, and are
+// SUBSETS OF THE NIFTY 500 rather than alternatives to it. A stock therefore appears legitimately
+// in both, and its two ranks mean different things — #48 of 500 places it in the market, #1 of 10
+// makes it the sector leader. Every reader here keeps them separate.
+const CAP_UNIVERSES = ['NIFTY500', 'MIDCAP', 'SMALLCAP', 'MICROCAP'];
+const SECTOR_UNIVERSES = ['NIFTYIT', 'NIFTYBANK', 'NIFTYPHARMA', 'NIFTYAUTO', 'NIFTYFMCG',
+  'NIFTYMETAL', 'NIFTYENERGY', 'NIFTYREALTY', 'NIFTYINFRA'];
+const UNIVERSES = [...CAP_UNIVERSES, ...SECTOR_UNIVERSES];
+
+// The --universe value capscanner.py expects, per universe key.
+const SCANNER_KEY = {
+  MIDCAP: 'midcap', SMALLCAP: 'smallcap', MICROCAP: 'microcap',
+  NIFTYIT: 'it', NIFTYBANK: 'bank', NIFTYPHARMA: 'pharma', NIFTYAUTO: 'auto',
+  NIFTYFMCG: 'fmcg', NIFTYMETAL: 'metal', NIFTYENERGY: 'energy',
+  NIFTYREALTY: 'realty', NIFTYINFRA: 'infra',
+};
+
 function _scriptArgs(universe) {
   if (universe === 'NIFTY500') return { script: 'nifty500_scanner.py', extraArgs: [] };
-  const key = { MIDCAP: 'midcap', SMALLCAP: 'smallcap', MICROCAP: 'microcap' }[universe];
+  const key = SCANNER_KEY[universe];
   if (!key) throw new Error(`Unknown universe "${universe}"`);
   return { script: 'capscanner.py', extraArgs: ['--universe', key] };
 }
@@ -104,7 +121,27 @@ async function runScan({ refreshFundamentals = false, trigger = 'manual', univer
     if (refreshFundamentals) args.push('--refresh-fundamentals');
     // Fundamentals crawl can take ~60 min on stale weeks; price-only ~10 min.
     const result = await _runScanner(script, args, 100 * 60 * 1000);
-    await universeScoresRepository.replaceScanRows(result.scanDate, result.rows || [], universe);
+
+    // A SCAN THAT SCORED NOTHING IS A FAILURE, NOT AN EMPTY RESULT.
+    //
+    // replaceScanRows deletes the universe's rows for the scan date and inserts what it was
+    // given, so handing it an empty list wipes that universe and stores nothing in its place —
+    // silently, with the scan reporting success. The universe then simply reads empty until the
+    // next good run, and nothing anywhere says why.
+    //
+    // It happens for a mundane reason: several scans running close together get the server
+    // rate-limited by Yahoo, every price download fails, and the scanner exits cleanly having
+    // scored zero stocks. There is no market condition in which a real scan scores none of its
+    // constituents, so this is always the rate-limit case — and the right response is to keep
+    // yesterday's rows, which are stale but true, rather than replace them with nothing.
+    const rows = result.rows || [];
+    if (!rows.length) {
+      throw new Error(`${universe} scan returned no scored stocks — almost always an upstream `
+        + 'rate-limit rather than a real result. Stored rows were left untouched; re-run it '
+        + 'spaced away from the other scans.');
+    }
+
+    await universeScoresRepository.replaceScanRows(result.scanDate, rows, universe);
     await persistDailyTop(result.scanDate, universe);   // freeze the day's official Top 25
     scanStates[universe] = {
       ...scanStates[universe], running: false, lastFinishedAt: new Date().toISOString(),
@@ -300,6 +337,23 @@ const SCHEDULE_SLOTS = {
   MIDCAP:    { h: 18, m: 45 },
   SMALLCAP:  { h: 19, m: 0  },
   MICROCAP:  { h: 19, m: 15 },
+  // Sector scans run after the cap-size block, 10 minutes apart. They are small — 10 to 40
+  // symbols against 150-500 — so 10 minutes is comfortable, and spacing them is the point:
+  // overlapping scans are what gets the address rate-limited by Yahoo, and a rate-limited scan
+  // scores zero stocks (see runScan, which now refuses to store that).
+  //
+  // The block runs 19:30 to 20:50, finishing before the 21:00 hour when heavier evening jobs
+  // tend to be scheduled. Nothing in EquiStar is scheduled at all today — see the note below —
+  // so this is a layout for whoever turns scheduling on, not a live timetable.
+  NIFTYIT:     { h: 19, m: 30 },
+  NIFTYBANK:   { h: 19, m: 40 },
+  NIFTYPHARMA: { h: 19, m: 50 },
+  NIFTYAUTO:   { h: 20, m: 0  },
+  NIFTYFMCG:   { h: 20, m: 10 },
+  NIFTYMETAL:  { h: 20, m: 20 },
+  NIFTYENERGY: { h: 20, m: 30 },
+  NIFTYREALTY: { h: 20, m: 40 },
+  NIFTYINFRA:  { h: 20, m: 50 },
 };
 
 function _scheduleOne(universe) {

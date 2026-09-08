@@ -52,6 +52,69 @@ UNIVERSES = {
         "fund_cache_file":   os.path.join(BASE, "fund_cache_microcap250.json"),
         "constit_url":       "https://niftyindices.com/IndexConstituent/ind_niftymicrocap250_list.csv",
     },
+    # ── Sector indices ────────────────────────────────────────────────────────
+    #
+    # SUBSETS OF THE NIFTY 500, and deliberately so. A stock scanned here is almost always
+    # scanned in NIFTY500 too, and the two ranks answer different questions: #48 of 500 says
+    # where it sits in the market, #1 of 10 says it leads its sector. Neither replaces the
+    # other, so nothing downstream collapses them.
+    #
+    # These lists are SMALL — 10 to 40 names — so a "Top 25" over one of them is usually the
+    # whole sector in rank order rather than a shortlist.
+    "it": {
+        "label": "Nifty IT",
+        "constituents_file": os.path.join(BASE, "nifty_it_constituents.csv"),
+        "fund_cache_file":   os.path.join(BASE, "fund_cache_it.json"),
+        "constit_url":       "https://niftyindices.com/IndexConstituent/ind_niftyitlist.csv",
+    },
+    "bank": {
+        "label": "Nifty Bank",
+        "constituents_file": os.path.join(BASE, "nifty_bank_constituents.csv"),
+        "fund_cache_file":   os.path.join(BASE, "fund_cache_bank.json"),
+        "constit_url":       "https://niftyindices.com/IndexConstituent/ind_niftybanklist.csv",
+    },
+    "pharma": {
+        "label": "Nifty Pharma",
+        "constituents_file": os.path.join(BASE, "nifty_pharma_constituents.csv"),
+        "fund_cache_file":   os.path.join(BASE, "fund_cache_pharma.json"),
+        "constit_url":       "https://niftyindices.com/IndexConstituent/ind_niftypharmalist.csv",
+    },
+    "auto": {
+        "label": "Nifty Auto",
+        "constituents_file": os.path.join(BASE, "nifty_auto_constituents.csv"),
+        "fund_cache_file":   os.path.join(BASE, "fund_cache_auto.json"),
+        "constit_url":       "https://niftyindices.com/IndexConstituent/ind_niftyautolist.csv",
+    },
+    "fmcg": {
+        "label": "Nifty FMCG",
+        "constituents_file": os.path.join(BASE, "nifty_fmcg_constituents.csv"),
+        "fund_cache_file":   os.path.join(BASE, "fund_cache_fmcg.json"),
+        "constit_url":       "https://niftyindices.com/IndexConstituent/ind_niftyfmcglist.csv",
+    },
+    "metal": {
+        "label": "Nifty Metal",
+        "constituents_file": os.path.join(BASE, "nifty_metal_constituents.csv"),
+        "fund_cache_file":   os.path.join(BASE, "fund_cache_metal.json"),
+        "constit_url":       "https://niftyindices.com/IndexConstituent/ind_niftymetallist.csv",
+    },
+    "energy": {
+        "label": "Nifty Energy",
+        "constituents_file": os.path.join(BASE, "nifty_energy_constituents.csv"),
+        "fund_cache_file":   os.path.join(BASE, "fund_cache_energy.json"),
+        "constit_url":       "https://niftyindices.com/IndexConstituent/ind_niftyenergylist.csv",
+    },
+    "realty": {
+        "label": "Nifty Realty",
+        "constituents_file": os.path.join(BASE, "nifty_realty_constituents.csv"),
+        "fund_cache_file":   os.path.join(BASE, "fund_cache_realty.json"),
+        "constit_url":       "https://niftyindices.com/IndexConstituent/ind_niftyrealtylist.csv",
+    },
+    "infra": {
+        "label": "Nifty Infra",
+        "constituents_file": os.path.join(BASE, "nifty_infra_constituents.csv"),
+        "fund_cache_file":   os.path.join(BASE, "fund_cache_infra.json"),
+        "constit_url":       "https://niftyindices.com/IndexConstituent/ind_niftyinfralist.csv",
+    },
 }
 
 

@@ -287,6 +287,16 @@ export function fetchStockInsight(symbol, force = false) {
   return request(`/api/recommendations/stock-insight?symbol=${encodeURIComponent(symbol)}${force ? '&force=1' : ''}`);
 }
 
+// The indices Stock Sleuth can report on. A static curated table, so this is fetched once and
+// kept — it is what decides whether a typed symbol takes the index path or the stock path.
+export function fetchIndexSymbols() {
+  return request('/api/recommendations/index-symbols');
+}
+
+export function fetchIndexPosition(symbol, days = 22) {
+  return request(`/api/recommendations/index-position?symbol=${encodeURIComponent(symbol)}&days=${days}`);
+}
+
 export function fetchIndustryScorecard(universe) {
   return request(`/api/recommendations/industry-scorecard${universe ? `?universe=${encodeURIComponent(universe)}` : ''}`);
 }

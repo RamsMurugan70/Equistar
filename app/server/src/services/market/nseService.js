@@ -5,6 +5,8 @@ const YAHOO_CHART_BASE_URL = 'https://query1.finance.yahoo.com/v8/finance/chart'
 const MOMENTUM_CACHE = new Map();
 const MOMENTUM_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+const indexRegistry = require('./indexRegistry');
+
 function getCachedMomentum(symbol) {
   const entry = MOMENTUM_CACHE.get(symbol);
   if (!entry) return null;
@@ -339,7 +341,20 @@ async function fetchYahooChart(symbolWithSuffix, range = '1y') {
 }
 
 async function fetchPriceHistory(symbol, range = '1y') {
-  const candidates = [`${symbol}.NS`, `${symbol}.BO`];
+  // AN INDEX RESOLVES TO ITS OWN TICKER AND NOTHING ELSE.
+  //
+  // This is the single seam where a symbol becomes a Yahoo ticker, so resolving indices here is
+  // all it takes for fetchMomentumSnapshot and garchService to work on them too — neither needs
+  // to know indices exist.
+  //
+  // The lookup is EXACT-MATCH (see indexRegistry): a loose rule would route a stock whose code
+  // merely starts with "NIFTY" to an index and report the index's prices under the company's
+  // name — valid-looking data that nothing downstream could catch.
+  //
+  // An index gets no `.NS`/`.BO` fallback. Those suffixes are the equity namespace; trying them
+  // for an index either 404s or, worse, hits an unrelated listing that happens to share the code.
+  const indexTicker = indexRegistry.yahooTickerFor(symbol);
+  const candidates = indexTicker ? [indexTicker] : [`${symbol}.NS`, `${symbol}.BO`];
   let lastError = null;
 
   for (const candidate of candidates) {

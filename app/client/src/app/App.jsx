@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import BrokerSetupPage from './BrokerSetupPage';
 import { Link, NavLink, Route, Routes, useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -56,6 +56,8 @@ import {
   fetchNifty500Consistent,
   fetchNifty500StockPosition,
   fetchNifty500Symbols,
+  fetchIndexSymbols,
+  fetchIndexPosition,
   fetchStockInsight,
   fetchSymbolHolding,
   fetchOrderImpact,
@@ -1767,11 +1769,77 @@ function DashboardPage() {
 // ─────────────────────────────────────────
 // Point-in-time report using prices stored in the snapshot for the chosen date.
 // Each stock shows its day-change on that date; portfolio total is value-weighted.
+// Short labels for the rank column, where the full universe name would not fit beside a rank.
+// Spelled out rather than derived: stripping "NIFTY" turns NIFTY500 into a bare "500" while
+// leaving MICROCAP untouched, which reads as two different kinds of thing.
+const RANK_UNIVERSE_LABEL = {
+  NIFTY500: 'N500', MIDCAP: 'MID', SMALLCAP: 'SMALL', MICROCAP: 'MICRO',
+  NIFTYIT: 'IT', NIFTYBANK: 'BANK', NIFTYPHARMA: 'PHARMA', NIFTYAUTO: 'AUTO',
+  NIFTYFMCG: 'FMCG', NIFTYMETAL: 'METAL', NIFTYENERGY: 'ENERGY',
+  NIFTYREALTY: 'REALTY', NIFTYINFRA: 'INFRA',
+};
+
+// Where a holding currently sits in every universe it is scanned in, and which way it moved.
+//
+// SEVERAL ROWS, NOT ONE. A stock is normally in exactly one cap-size universe but is also in a
+// sector universe, and those ranks answer different questions — #48 of 500 places it in the
+// market, #1 of 10 makes it the sector leader. Collapsing them to a single "rank" would throw
+// away the more interesting of the two.
+//
+// THE ARROW IS INVERTED ON PURPOSE. `rankChange` is positive when the rank NUMBER grew, and a
+// bigger rank number is a WORSE position. Rendering the sign directly would draw a green up-arrow
+// for a stock that just fell forty places.
+function RankCell({ moves }) {
+  if (!moves || !moves.length) return <span className="muted">—</span>;
+  return (
+    <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>
+      {moves.map((rm) => {
+        const worse = rm.rankChange > 0;
+        const better = rm.rankChange < 0;
+        const arrow = rm.rankChange == null ? '' : worse ? '▼' : better ? '▲' : '→';
+        const color = rm.rankChange == null ? 'var(--text-muted)' : worse ? '#b32d19' : better ? '#05664a' : 'var(--text-muted)';
+        return (
+          <span key={rm.universe} style={{ display: 'inline-flex', alignItems: 'baseline', gap: 5, whiteSpace: 'nowrap' }}
+            title={rm.weekAgoRank != null
+              ? `${rm.universe}: #${rm.currentRank} of ${rm.currentTotal}, was #${rm.weekAgoRank} a week ago`
+              : `${rm.universe}: #${rm.currentRank} of ${rm.currentTotal}`}>
+            <span style={{ fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 700 }}>
+              {RANK_UNIVERSE_LABEL[rm.universe] || rm.universe}
+            </span>
+            <span style={{ fontSize: 12.5, fontWeight: 700 }}>#{rm.currentRank}</span>
+            <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>/{rm.currentTotal}</span>
+            {rm.rankChange != null && rm.rankChange !== 0 && (
+              <span style={{ fontSize: 11.5, fontWeight: 800, color }}>
+                {arrow}{Math.abs(rm.rankChange)}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 function AsOfReportPanel() {
+  const navigate = useNavigate();
   const [data,      setData]      = useState(null);
   const [portfolio, setPortfolio] = useState('');   // '' = all
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState('');
+  const [rankBySymbol, setRankBySymbol] = useState({});
+
+  // Ranks arrive in one batch keyed by NSE symbol, after the report itself — the table is useful
+  // without them, and blocking the whole report on a scan-data lookup would make a slow rank
+  // query look like a slow portfolio.
+  useEffect(() => {
+    const syms = [...new Set((data?.portfolios || [])
+      .flatMap((p) => (p.holdings || []).map((h) => h.nseSymbol || h.symbol))
+      .filter(Boolean))];
+    if (!syms.length) { setRankBySymbol({}); return; }
+    fetchRankMovementBatch(syms)
+      .then((d) => setRankBySymbol(d || {}))
+      .catch(() => setRankBySymbol({}));
+  }, [data]);
 
   function load(date, port) {
     setLoading(true); setError('');
@@ -1827,15 +1895,27 @@ function AsOfReportPanel() {
               <table className="data-table compact-table">
                 <thead>
                   <tr>
-                    <th scope="col">Stock</th><th scope="col">Sector</th><th scope="col">Qty</th><th scope="col">Avg Cost</th>
+                    <th scope="col">Stock</th><th scope="col">Sector</th>
+                    <th scope="col" title="Current rank in every scanned universe this stock belongs to, with the week's move. A bigger rank number is a worse position, so the arrow reads as performance.">Rank</th>
+                    <th scope="col">Qty</th><th scope="col">Avg Cost</th>
                     <th scope="col">Price</th><th scope="col">Value</th><th scope="col">P&amp;L</th><th scope="col">Net %</th><th scope="col">Day %</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(p.holdings || []).slice().sort((a, b) => (b.dayChangePct || 0) - (a.dayChangePct || 0)).map((h) => (
                     <tr key={h.symbol}>
-                      <td style={{ fontWeight: 600 }}>{h.symbol}</td>
+                      <td style={{ fontWeight: 600 }}>
+                        {h.symbol}
+                        {/* Deep-links on the RESOLVED NSE symbol, not the broker code the row
+                            displays — Stock Sleuth searches the scans, which are keyed by NSE. */}
+                        <button type="button"
+                          onClick={() => navigate(`/stock-lookups?symbol=${encodeURIComponent(h.nseSymbol || h.symbol)}`)}
+                          title={`Open Stock Sleuth for ${h.nseSymbol || h.symbol}`}
+                          style={{ background: 'none', border: 'none', padding: '0 0 0 6px', cursor: 'pointer',
+                            fontSize: 12.5, opacity: 0.65, lineHeight: 1 }}>🔎</button>
+                      </td>
                       <td style={{ color: 'var(--text-muted)', fontSize: 13 }}>{h.sector}</td>
+                      <td><RankCell moves={rankBySymbol[String(h.nseSymbol || h.symbol).toUpperCase()]} /></td>
                       <td>{fmt(h.quantity)}</td>
                       <td>{fmt(h.avgCost, 2)}</td>
                       <td>{fmt(h.ltp, 2)}</td>
@@ -3604,6 +3684,18 @@ const LOOKUP_UNIVERSES = [
   { key: 'MIDCAP',   label: 'Nifty Midcap 150',    icon: '🥈', totalLabel: '150' },
   { key: 'SMALLCAP', label: 'Nifty Smallcap 250',  icon: '🥉', totalLabel: '250' },
   { key: 'MICROCAP', label: 'Nifty Microcap 250',  icon: '🔬', totalLabel: '250' },
+  // Sector universes are SUBSETS of the Nifty 500, so a stock shows a card for each — #48 of 500
+  // beside #1 of 10. That repetition is the information, not noise: one says where it stands in
+  // the market, the other whether it leads its sector.
+  { key: 'NIFTYIT',     label: 'Nifty IT',     icon: '💻', totalLabel: 'sector' },
+  { key: 'NIFTYBANK',   label: 'Nifty Bank',   icon: '🏦', totalLabel: 'sector' },
+  { key: 'NIFTYPHARMA', label: 'Nifty Pharma', icon: '💊', totalLabel: 'sector' },
+  { key: 'NIFTYAUTO',   label: 'Nifty Auto',   icon: '🚗', totalLabel: 'sector' },
+  { key: 'NIFTYFMCG',   label: 'Nifty FMCG',   icon: '🛒', totalLabel: 'sector' },
+  { key: 'NIFTYMETAL',  label: 'Nifty Metal',  icon: '⛏️', totalLabel: 'sector' },
+  { key: 'NIFTYENERGY', label: 'Nifty Energy', icon: '⚡', totalLabel: 'sector' },
+  { key: 'NIFTYREALTY', label: 'Nifty Realty', icon: '🏗️', totalLabel: 'sector' },
+  { key: 'NIFTYINFRA',  label: 'Nifty Infra',  icon: '🛤️', totalLabel: 'sector' },
 ];
 
 // ── Stock Sleuth right-hand panel: the fundamental case for the stock, next to the
@@ -3991,6 +4083,136 @@ function HoldingsBox({ holding, loading }) {
   );
 }
 
+// The report for an index. Deliberately a different card from the stock one, not the stock card
+// with half its panels hidden.
+//
+// RELATIVE STRENGTH IS RENDERED AS POINTS, NOT PERCENT, and looks different on purpose. A
+// difference between two percentages is a number of percentage points; showing "+2.9%" beside a
+// column of real percentages invites reading it as a return, which it is not. So these carry a
+// "pts" suffix, a distinct violet treatment, and never a % sign.
+function RelPoints({ value }) {
+  if (value == null) return <span style={{ fontSize: 13, color: '#656974' }}>—</span>;
+  const pos = value >= 0;
+  return (
+    <span title="Percentage POINTS versus the Nifty 50 over the same window — a difference of two returns, not a return"
+      style={{ display: 'inline-flex', alignItems: 'baseline', gap: 2, fontSize: 13.5, fontWeight: 800,
+        color: pos ? '#05664a' : '#b32d19', background: pos ? '#ecfdf5' : '#fef2f2',
+        border: pos ? '1px solid #a7f3d0' : '1px solid #fecaca', borderRadius: 5, padding: '1px 7px' }}>
+      {pos ? '+' : ''}{value}
+      <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.75 }}>pts</span>
+    </span>
+  );
+}
+
+function IndexReportCard({ data }) {
+  const rel = data.benchmark?.relative || {};
+  const bench = data.benchmark?.returns || {};
+  const windows = data.windows || [];
+  return (
+    <div style={{ marginTop: 12, paddingTop: 10, borderTop: '2px solid #ddd6fe' }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ background: '#6d28d9', color: '#fff', borderRadius: 6, padding: '2px 10px', fontSize: 13, fontWeight: 700 }}>
+          📊 Index
+        </span>
+        <strong style={{ fontSize: 16, color: '#6d28d9' }}>{data.label}</strong>
+        <span style={{ fontSize: 12.5, color: '#656974' }}>{data.group} · {data.yahoo} · as of {data.asOfDate}</span>
+      </div>
+
+      {/* Live standing. The same shape as a stock's, because these genuinely do mean the same
+          thing for an index: a level, its distance from the moving averages, the trend read. */}
+      {data.live && (
+        <div style={{ marginTop: 8, padding: '10px 12px', background: '#fff', border: '1px solid #ddd6fe', borderRadius: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 12 }}>
+            {data.live.currentPrice != null && (
+              <div>
+                <div style={{ fontSize: 11.5, color: '#565a6b', fontWeight: 700, textTransform: 'uppercase' }}>Level</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#6d28d9' }}>{fmt(data.live.currentPrice, 2)}</div>
+                {data.live.trendStatus && <div style={{ fontSize: 11.5, color: '#565a6b' }}>{data.live.trendStatus}</div>}
+              </div>
+            )}
+            {data.live.emaLadder && (
+              <div>
+                <div style={{ fontSize: 11.5, color: '#565a6b', fontWeight: 700, textTransform: 'uppercase' }}>EMA Trend</div>
+                <div style={{ marginTop: 3 }}>
+                  <span style={{ background: EMA_LADDER_STYLE[data.live.emaLadder]?.bg, color: EMA_LADDER_STYLE[data.live.emaLadder]?.fg,
+                    borderRadius: 6, padding: '3px 9px', fontSize: '0.72rem', fontWeight: 700 }}>
+                    {EMA_LADDER_STYLE[data.live.emaLadder]?.label || data.live.emaLadder}
+                  </span>
+                </div>
+              </div>
+            )}
+            {[['vs 50 DMA', data.live.cmpVs50DmaPct], ['vs 200 DMA', data.live.cmpVs200DmaPct],
+              ['Off 52w high', data.live.distanceFrom52WeekHighPct]].map(([label, v]) => (v == null ? null : (
+              <div key={label}>
+                <div style={{ fontSize: 11.5, color: '#565a6b', fontWeight: 700, textTransform: 'uppercase' }}>{label}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: v >= 0 ? '#05664a' : '#b32d19' }}>
+                  {v >= 0 ? '+' : ''}{v.toFixed(1)}%
+                </div>
+              </div>
+            )))}
+          </div>
+        </div>
+      )}
+
+      {/* Returns, and — for everything except the Nifty 50 itself — the same windows measured
+          against it. This is the reason to look at an index report at all. */}
+      <div style={{ marginTop: 10, overflowX: 'auto' }}>
+        <table className="data-table compact-table" style={{ minWidth: 420 }}>
+          <thead>
+            <tr>
+              <th scope="col"></th>
+              {windows.map((w) => (
+                <th key={w.key} scope="col" style={{ textAlign: 'right' }}>{w.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={{ fontWeight: 700 }}>{data.label}</td>
+              {windows.map((w) => (
+                <td key={w.key} style={{ textAlign: 'right' }}><ReturnCell value={data.returns[w.key]} /></td>
+              ))}
+            </tr>
+            {data.benchmark && (
+              <React.Fragment>
+                <tr>
+                  <td style={{ color: '#565a6b' }}>{data.benchmark.label}</td>
+                  {windows.map((w) => (
+                    <td key={w.key} style={{ textAlign: 'right' }}><ReturnCell value={bench[w.key]} /></td>
+                  ))}
+                </tr>
+                <tr style={{ background: '#faf5ff' }}>
+                  <td style={{ fontWeight: 800, color: '#6d28d9' }}
+                    title="The index's return minus the Nifty 50's, over the same window">
+                    Relative strength
+                  </td>
+                  {windows.map((w) => (
+                    <td key={w.key} style={{ textAlign: 'right' }}><RelPoints value={rel[w.key]} /></td>
+                  ))}
+                </tr>
+              </React.Fragment>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <p style={{ fontSize: 12.5, color: '#565a6b', margin: '8px 0 0', lineHeight: 1.5 }}>
+        {data.benchmark
+          ? <>Relative strength is in <strong>percentage points</strong> against the {data.benchmark.label},
+             not a percentage. A sector down 5% while the market is down 3.6% reads as <strong>-1.4 pts</strong>.</>
+          : <>This is the market benchmark, so it has no relative-strength row — it would be compared with itself.</>}
+      </p>
+
+      {/* Said plainly rather than left as blank panels. A stock report has more sections; an index
+          genuinely has no equivalent for them, which is a different thing from failing to load. */}
+      <p style={{ fontSize: 12, color: '#656974', margin: '6px 0 0' }}>
+        Not shown for an index: {(data.omits || []).join(', ')} — none of these exist for an index,
+        rather than being unavailable.
+      </p>
+    </div>
+  );
+}
+
 function StockLookupPanel() {
   const [searchParams] = useSearchParams();
   const [posSym, setPosSym]   = useState(() => searchParams.get('symbol') || '');
@@ -4002,6 +4224,28 @@ function StockLookupPanel() {
   const [showSugg, setShowSugg] = useState(false);
   const [holding, setHolding] = useState(null);   // this symbol's position across both portfolios
   const [holdingBusy, setHoldingBusy] = useState(false);
+  const [indexList, setIndexList] = useState([]);     // curated index table (static)
+  const [indexReady, setIndexReady] = useState(false); // resolved, success OR failure
+  const [indexData, setIndexData] = useState(null);   // an index report, when one was searched
+
+  // The index table decides which path a search takes, so it is fetched once on mount rather
+  // than lazily on focus like the symbol directory.
+  //
+  // `indexReady` FLIPS ON FAILURE TOO. The deep-link effect below waits on it, and a fetch that
+  // never resolves would leave /stock-lookups?symbol=XXX permanently inert — turning a missing
+  // index list into a broken stock lookup, which is far worse than losing index support.
+  useEffect(() => {
+    let alive = true;
+    fetchIndexSymbols()
+      .then((d) => { if (alive) setIndexList(d.rows || []); })
+      .catch(() => { if (alive) setIndexList([]); })
+      .finally(() => { if (alive) setIndexReady(true); });
+    return () => { alive = false; };
+  }, []);
+
+  const indexByKey = useMemo(
+    () => new Map(indexList.map((i) => [i.key.toUpperCase(), i])),
+    [indexList]);
 
   function ensureSymbolDir() {
     if (symDir) return;
@@ -4021,21 +4265,46 @@ function StockLookupPanel() {
     });
   }
 
+  // INDICES COME FIRST, and that ordering is the point rather than a preference. Dozens of
+  // companies carry "NIFTY"-adjacent words in their names, so ranking by string match alone
+  // buries Nifty 50 under stocks nobody typing "NIFTY" was looking for. Someone typing an index
+  // name wants the index.
   const suggestions = useMemo(() => {
     const q = posSym.trim().toUpperCase();
-    if (!symDir || q.length < 2) return [];
+    if (q.length < 2) return [];
+
+    const idxHits = indexList
+      .filter((i) => i.key.toUpperCase().includes(q) || i.label.toUpperCase().includes(q))
+      .map((i) => ({ symbol: i.key, name: i.label, isIndex: true, group: i.group }));
+
+    if (!symDir) return idxHits.slice(0, 10);
+
     const byPrefix = symDir.filter((s) => s.symbol.toUpperCase().startsWith(q));
     const byName = symDir.filter((s) =>
       !s.symbol.toUpperCase().startsWith(q) &&
       (s.symbol.toUpperCase().includes(q) || String(s.name || '').toUpperCase().includes(q)));
-    return [...byPrefix, ...byName].slice(0, 10);
-  }, [symDir, posSym]);
+    return [...idxHits, ...byPrefix, ...byName].slice(0, 10);
+  }, [symDir, posSym, indexList]);
 
   async function lookupPosition(symOverride) {
     const sym = (typeof symOverride === 'string' ? symOverride : posSym).trim();
     if (!sym) { setPosErr('Enter a symbol.'); return; }
     setShowSugg(false);
-    setPosBusy(true); setPosErr(''); setResults(null);
+    setPosBusy(true); setPosErr(''); setResults(null); setIndexData(null);
+
+    // AN INDEX TAKES A DIFFERENT PATH ENTIRELY, not the stock path with pieces missing. It has
+    // no scan history to search, no fundamentals and no holdings, so those fetches are skipped
+    // rather than fired and discarded — thirteen requests that can only 404.
+    const idx = indexByKey.get(sym.toUpperCase());
+    if (idx) {
+      setHolding(null); setHoldingBusy(false);
+      try {
+        setIndexData(await fetchIndexPosition(idx.key, posDays));
+      } catch (e) { setPosErr(e.message); }
+      finally { setPosBusy(false); }
+      return;
+    }
+
     // Holdings are independent of whether the symbol turns up in any scanned universe, so
     // this runs alongside the lookup rather than waiting on it.
     setHolding(null); setHoldingBusy(true);
@@ -4051,24 +4320,34 @@ function StockLookupPanel() {
       ));
       const found = settled.filter((r) => r.data && r.data.daysCovered > 0);
       setResults(found);
-      if (!found.length) setPosErr(`${sym.toUpperCase()} not found in any stored scan — check the symbol (NSE code) or whether it's a constituent of Nifty 500 / Midcap 150 / Smallcap 250 / Microcap 250.`);
+      if (!found.length) setPosErr(`${sym.toUpperCase()} not found in any stored scan — check the symbol (NSE code), or whether it's a constituent of one of the scanned universes.`);
     } catch (e) { setPosErr(e.message); }
     finally { setPosBusy(false); }
   }
 
-  // Deep-link support: /stock-lookups?symbol=XXX (e.g. from the Dashboard's Exit
-  // Candidates card) pre-fills the search and runs it immediately.
+  // Deep-link support: /stock-lookups?symbol=XXX (e.g. from the Dashboard's Exit Candidates card
+  // or a Portfolio row's magnifier) pre-fills the search and runs it immediately.
+  //
+  // GATED ON `indexReady`, not run on mount. lookupPosition decides index-or-stock by consulting
+  // the index table, so firing before that table arrives sends a deep-linked index down the stock
+  // path, where it finds no scan rows and reports "not found" — for a symbol that works perfectly
+  // when typed a second later. `indexReady` flips on failure too, so a dead index endpoint delays
+  // this by one request instead of disabling deep links altogether.
+  const deepLinked = useRef(false);
   useEffect(() => {
+    if (!indexReady || deepLinked.current) return;
     const sym = searchParams.get('symbol');
-    if (sym) lookupPosition(sym);
+    if (sym) { deepLinked.current = true; lookupPosition(sym); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [indexReady]);
 
   return (
     <div className="panel" style={{ marginTop: 18 }}>
       <h2 style={{ margin: 0 }}>🔎 Stock Sleuth</h2>
       <p style={{ margin: '3px 0 0', fontSize: 13, color: '#565a6b' }}>
-        One search, all four scanned universes — Nifty 500, Midcap 150, Smallcap 250, Microcap 250.
+        Type an index name for a report on the index itself — level, trend and how it has moved
+        against the Nifty 50. Type a stock for its rank, scores and fundamentals across Nifty 500,
+        the cap-size universes, and its sector.
       </p>
       <div style={{ marginTop: 14, padding: '10px 12px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -4093,11 +4372,19 @@ function StockLookupPanel() {
                     onClick={() => { setPosSym(s.symbol); setShowSugg(false); lookupPosition(s.symbol); }}
                     style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none',
                       borderBottom: '1px solid #f0f9ff', padding: '8px 13px', cursor: 'pointer' }}>
-                    <span style={{ fontWeight: 700, fontSize: 13.5, color: '#1355a8' }}>{s.symbol}</span>
+                    <span style={{ fontWeight: 700, fontSize: 13.5, color: s.isIndex ? '#6d28d9' : '#1355a8' }}>{s.symbol}</span>
                     <span style={{ fontSize: 12.5, color: '#565a6b', marginLeft: 8 }}>{String(s.name || '').slice(0, 30)}</span>
-                    <span style={{ fontSize: 11.5, color: '#1355a8', marginLeft: 6 }}>
-                      {s.universes.map((u) => LOOKUP_UNIVERSES.find((c) => c.key === u)?.icon).join(' ')}
-                    </span>
+                    {/* An index and a stock produce completely different reports, so the row has
+                        to say which it is before it is clicked — not after. */}
+                    {s.isIndex ? (
+                      <span style={{ fontSize: 10.5, fontWeight: 800, marginLeft: 7, padding: '1px 6px',
+                        background: '#ede9fe', color: '#6d28d9', border: '1px solid #ddd6fe', borderRadius: 4,
+                        textTransform: 'uppercase', letterSpacing: 0.4 }}>Index</span>
+                    ) : (
+                      <span style={{ fontSize: 11.5, color: '#1355a8', marginLeft: 6 }}>
+                        {(s.universes || []).map((u) => LOOKUP_UNIVERSES.find((c) => c.key === u)?.icon).join(' ')}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -4141,7 +4428,9 @@ function StockLookupPanel() {
 
         {/* Volatility is the same number whichever universe the stock was found in, so it is
             taken from whichever card carries it and shown once. */}
-        <GarchStrip garch={(results || []).map((r) => r.data?.garch).find(Boolean)} />
+        <GarchStrip garch={indexData ? indexData.garch : (results || []).map((r) => r.data?.garch).find(Boolean)} />
+
+        {indexData && <IndexReportCard data={indexData} />}
 
         {/* Two columns: the per-universe technical history on the left, the company's
             fundamental case on the right. Fundamentals are a property of the COMPANY, not of
@@ -7127,7 +7416,7 @@ function AskAnswer({ m }) {
 function StockLookupsPage() {
 
   return (
-    <PageShell title="Stock Sleuth" subtitle="One search across all four scanned universes — Nifty 500, Midcap, Smallcap, and Microcap">
+    <PageShell title="Stock Sleuth" subtitle="One search — indices, plus every scanned universe: Nifty 500, the cap-size lists, and the sector indices">
       <StockLookupPanel />
     </PageShell>
   );

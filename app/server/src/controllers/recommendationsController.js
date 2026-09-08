@@ -325,7 +325,33 @@ async function industryScorecard(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// The indices Stock Sleuth can report on. Static — it is a curated table, not scan output — so
+// the client can fetch it once and use it to decide which path a search takes.
+async function indexSymbols(_req, res, next) {
+  try {
+    res.json({ rows: require('../services/market/indexRegistry').list() });
+  } catch (e) { next(e); }
+}
+
+// The report for one index. Separate from /nifty500-stock-position because almost nothing is
+// shared: an index has no scan history to read, and gains a benchmark comparison a stock has no
+// equivalent for.
+async function indexPosition(req, res, next) {
+  try {
+    const { symbol, days } = req.query;
+    if (!symbol) return res.status(400).json({ error: 'symbol is required' });
+    const svc = require('../services/market/indexReportService');
+    return res.json(await svc.build(symbol, { days: Math.min(Number(days) || 22, 365) }));
+  } catch (e) {
+    if (e.code === 'NOT_AN_INDEX') return res.status(404).json({ error: e.message, code: e.code });
+    if (e.code === 'INDEX_DATA_UNAVAILABLE') return res.status(502).json({ error: e.message, code: e.code });
+    return next(e);
+  }
+}
+
 module.exports = {
+  indexSymbols,
+  indexPosition,
   industryScorecard,
   stockInsight,
   listRecommendations,
