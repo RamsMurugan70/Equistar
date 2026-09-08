@@ -32,6 +32,19 @@ services:
       # Decrypts every participant's stored broker API secret. LOSING THIS MEANS ALL 25 RE-ENTER
       # THEIR KEYS — keep a copy somewhere other than this server.
       CREDENTIAL_KEY: "${CREDENTIAL_KEY:?generate with openssl rand -hex 32, and keep a copy}"
+
+      # ── Ask the Data (optional) ──────────────────────────────────────────
+      # Unset, the feature reports itself as unconfigured and answers nothing. Set, EVERY
+      # participant's questions go through this one key, so its rate limit is shared by the room.
+      #
+      # ASK_SUMMARIZE decides whether result ROWS leave the server. On, up to 30 rows of a
+      # participant's holdings are sent to the provider to be summarised into a sentence; off,
+      # only the question and the schema go, and the rows stay here. On Google's FREE tier the
+      # content of API requests may be used to improve their products, which is the opposite of
+      # what "free" implies for data — so this defaults to off and is opted into deliberately.
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      ASK_SUMMARIZE: "${ASK_SUMMARIZE:-false}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-}"
     volumes:
       - equistar-data:/data
     healthcheck:

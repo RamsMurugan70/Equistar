@@ -54,6 +54,16 @@ function createUserDb(loginId) {
   return file;
 }
 
+// Ask the Data's settings, forwarded to a participant's process only when they are actually
+// configured. Absent keys leave the service's own defaults in charge.
+function askDataEnv() {
+  const out = {};
+  for (const k of ['GEMINI_API_KEY', 'ASK_LLM_PROVIDER', 'ASK_SUMMARIZE', 'GEMINI_MODEL']) {
+    if (process.env[k]) out[k] = process.env[k];
+  }
+  return out;
+}
+
 function isUp(loginId) {
   const r = running.get(loginId);
   return !!(r && r.child && !r.child.killed && r.child.exitCode === null);
@@ -94,6 +104,18 @@ async function start(participant) {
       // editable today, so that is not yet a case anyone can hit.
       INSTANCE_OWNER_NAME: participant.display_name || loginId,
       CREDENTIAL_KEY: config.credentialKey,
+      // ASK THE DATA reaches an LLM from inside the participant's own process, so its settings
+      // have to arrive here. They would be inherited through the process.env spread above
+      // anyway; naming them keeps this list an honest inventory of what an instance is given —
+      // including the fact that it can call out to a third party at all.
+      //
+      // ASK_SUMMARIZE controls whether RESULT ROWS leave the server. With it on, up to 30 rows
+      // of that participant's holdings go to the provider to be turned into a sentence; with it
+      // off, only the question and the table schema do, and the rows stay here.
+      // PASSED ONLY WHEN SET, never as an empty string. askDataService defaults with `??`, which
+      // falls back on undefined but NOT on '' — so forwarding an empty value would silently
+      // override the default it was written to fall back to.
+      ...askDataEnv(),
     },
     // Not detached: a hub that goes down should not leave 25 orphans holding ports and database
     // handles, which is exactly the state that makes the next start fail for reasons nobody can
