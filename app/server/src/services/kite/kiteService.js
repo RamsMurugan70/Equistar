@@ -162,21 +162,57 @@ async function fetchHoldings() {
   });
 
   // Map Kite holding → app portfolio holding format (richer than CSV)
-  return (raw || []).map((h) => ({
-    instrument: h.tradingsymbol,
-    exchange:   h.exchange,
-    isin:       h.isin,
-    qty:        (h.quantity || 0) + (h.t1_quantity || 0),
-    avgCost:    h.average_price || 0,
-    ltp:        h.last_price    || 0,
-    invested:   ((h.quantity || 0) + (h.t1_quantity || 0)) * (h.average_price || 0),
-    curVal:     ((h.quantity || 0) + (h.t1_quantity || 0)) * (h.last_price    || 0),
-    pnl:        h.pnl           || 0,
-    dayChg:     h.day_change_percentage || 0,
-    netChg:     h.average_price > 0
-      ? (((h.last_price - h.average_price) / h.average_price) * 100)
-      : 0,
-  }));
+  //
+  // PLEDGED SHARES LIVE IN A SEPARATE FIELD, and leaving it out reports them as sold.
+  //
+  // When holdings are pledged with Zerodha for margin, the shares move OUT of `quantity` and
+  // into `collateral_quantity`. They are still owned — they are simply encumbered. A fully
+  // pledged holding therefore arrives as `quantity: 0, collateral_quantity: 500`, and summing
+  // only quantity + t1_quantity reported it as a zero position: the stock appeared to have
+  // vanished from the portfolio, which is exactly how it was noticed.
+  //
+  // The three quantities added here are the only ones that do not overlap:
+  //   quantity            settled, in demat, unencumbered
+  //   t1_quantity         bought but not yet settled into demat
+  //   collateral_quantity pledged with the broker as margin collateral
+  //
+  // The rest of Kite's quantity fields are views OF those, not additions to them —
+  // `opening_quantity` is the day's starting figure, `realised_quantity` and `used_quantity`
+  // are subsets, and `authorised_quantity` is the part of `quantity` released for sale via
+  // TPIN. Adding any of them would double-count.
+  //
+  // The ICICI path already solves the same problem a different way, because Breeze exposes no
+  // collateral field: it takes the larger of the demat and portfolio quantities and flags the
+  // difference as pledged. Both now set the same `pledged` flag, which is persisted and shown.
+  const qtyOf = (h) => (h.quantity || 0) + (h.t1_quantity || 0) + (h.collateral_quantity || 0);
+
+  return (raw || []).map((h) => {
+    const qty        = qtyOf(h);
+    const avgCost    = h.average_price || 0;
+    const ltp        = h.last_price    || 0;
+    const collateral = h.collateral_quantity || 0;
+    return {
+      instrument: h.tradingsymbol,
+      exchange:   h.exchange,
+      isin:       h.isin,
+      qty,
+      avgCost,
+      ltp,
+      invested:   qty * avgCost,
+      curVal:     qty * ltp,
+      // COMPUTED, NOT TAKEN FROM KITE. Kite's own `pnl` is struck on the unpledged quantity,
+      // so on a pledged holding it would contradict the invested and current values beside it
+      // — the row would show a large position with a P&L belonging to a smaller one. For an
+      // unpledged holding this is the identical number.
+      pnl:        qty * (ltp - avgCost),
+      dayChg:     h.day_change_percentage || 0,
+      netChg:     avgCost > 0 ? (((ltp - avgCost) / avgCost) * 100) : 0,
+      // Same flag the ICICI path sets, so the UI tags both alike and a stored capture can tell
+      // "quantity 0 because pledged" from "quantity 0 because sold".
+      pledged:      collateral > 0,
+      collateralQty: collateral,
+    };
+  });
 }
 
 // Today's EXECUTED trades (fills) — real prices, unlike the raw order book.

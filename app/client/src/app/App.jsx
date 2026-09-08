@@ -2456,6 +2456,16 @@ function PortfolioPage() {
         {/* Holdings preview */}
         {kitePreview?.holdings?.length > 0 && (
           <div style={{ marginTop: 14 }}>
+            {/* The same note the Breeze preview carries. Pledged shares used to arrive as qty 0
+                and read as a sold position, so when the number changes it should say why. */}
+            {kitePreview.holdings.some((h) => h.pledged) && (
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 460, marginBottom: 8 }}>
+                📌 includes {kitePreview.holdings.filter((h) => h.pledged).length} pledged-for-margin holding(s) worth ₹
+                {kitePreview.holdings.filter((h) => h.pledged).reduce((s, h) => s + (Number(h.curVal) || 0), 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                {' '}— Kite reports these under <code>collateral_quantity</code> with a quantity of 0,
+                so they previously showed as zero.
+              </div>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
               <span style={{ fontWeight: 600, fontSize: 14 }}>Preview — {kitePreview.count} holdings</span>
               <input type="date" value={portfolioDate} onChange={(e) => setPortfolioDate(e.target.value)}
