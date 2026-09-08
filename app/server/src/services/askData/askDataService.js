@@ -30,8 +30,30 @@ const TABLE_HINTS = {
 
 let _schemaCache = null;
 
+// The participant's own database, plus the shared market data, both READ-ONLY.
+//
+// MARKET DATA WAS ADVERTISED BUT UNREACHABLE. TABLE_HINTS describes universe_scores and
+// universe_top_daily, and the prompt tells the model to use them — but this opened only
+// config.dbPath, where those tables do not exist. Every question about the Top 25 or a scan
+// ranking failed with "no such table: universe_scores", which reads as the assistant being
+// broken rather than as a missing attach.
+//
+// SQLite opens an attached database with the SAME flags as the connection, so attaching to an
+// OPEN_READONLY handle cannot introduce a write path: a write to either file fails with
+// SQLITE_READONLY. Verified rather than assumed.
+//
+// Serialized before the attach for the reason documented in db/connection.js: node-sqlite3 runs
+// statements concurrently by default, so a query can otherwise race the ATTACH and fail
+// intermittently with "no such table".
 function _openRO() {
-  return new sqlite3.Database(config.dbPath, sqlite3.OPEN_READONLY);
+  const db = new sqlite3.Database(config.dbPath, sqlite3.OPEN_READONLY);
+  if (config.marketDbPath) {
+    db.serialize();
+    db.run(`ATTACH DATABASE '${config.marketDbPath.replace(/'/g, "''")}' AS market`, (err) => {
+      if (err) console.warn(`\u26a0 ask-the-data: shared market data unavailable: ${err.message}`);
+    });
+  }
+  return db;
 }
 
 function _all(db, sql, params = []) {
@@ -136,13 +158,71 @@ function _extractSql(text) {
   return s.replace(/;+\s*$/, '').trim();   // drop trailing semicolons
 }
 
-// Hard guardrail: single read-only SELECT only.
+// Schemas a query may name. `main` is this participant's own database; `market` is the shared
+// scan data. Nothing else is ever attached, so nothing else can be legitimately referenced.
+const ALLOWED_SCHEMAS = new Set(['main', 'market']);
+
+/**
+ * Every table the generated SQL reads from, plus the names it defines itself in a WITH clause.
+ *
+ * A CTE is not a table, so its name has to be collected or a perfectly valid query using one
+ * would be rejected. `name AS (` is the CTE form; a column alias is `expr AS name` with no
+ * parenthesis, so this does not confuse the two.
+ */
+function _tableRefs(sql) {
+  const ctes = new Set();
+  for (const m of sql.matchAll(/([A-Za-z_]\w*)\s+AS\s*\(/gi)) ctes.add(m[1].toLowerCase());
+
+  const refs = [];
+  // FROM/JOIN followed by an identifier. A subquery starts with "(" and is skipped — its own
+  // FROM clauses are matched separately by the same pass.
+  for (const m of sql.matchAll(/\b(?:FROM|JOIN)\s+([A-Za-z_][\w$]*(?:\s*\.\s*[A-Za-z_][\w$]*)?)/gi)) {
+    refs.push(m[1].replace(/\s+/g, ''));
+  }
+  return { refs, ctes };
+}
+
+/**
+ * Hard guardrail: one read-only SELECT, over known tables only.
+ *
+ * AN ALLOWLIST, NOT A BLOCKLIST, and that is the point of this function.
+ *
+ * The previous version banned a list of dangerous keywords. That is open-ended by nature — it
+ * holds only while the list is complete — and it was the ONLY thing keeping one participant out
+ * of another's data. Every participant's database file sits in the same container, readable by
+ * the same OS user, so a single `ATTACH DATABASE '/data/users/<someone>/app.db'` reads their
+ * orders in full; that was confirmed, not theorised. The process boundary that isolates the rest
+ * of EquiStar does not extend to a file path typed inside a query.
+ *
+ * So the test is inverted: a query may name ONLY the tables this assistant documents, in the two
+ * schemas that are actually attached. A reference to anything else — another user's file under
+ * any alias, sqlite_master, a table that exists but was never exposed — fails because it is not
+ * on the list, without anyone having to have predicted it.
+ *
+ * The keyword check is kept as a second layer. It is now redundant for reads, but it still
+ * refuses a write verb early and with a clearer message than a schema error.
+ */
 function _validateSql(sql) {
   if (!sql) throw new Error('No SQL was generated.');
   if (sql.includes(';')) throw new Error('Only a single statement is allowed.');
   if (!/^(SELECT|WITH)\b/i.test(sql)) throw new Error('Only SELECT queries are allowed.');
   const forbidden = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|ATTACH|DETACH|PRAGMA|VACUUM|REINDEX|TRIGGER|GRANT)\b/i;
   if (forbidden.test(sql)) throw new Error('Query contains a non-read-only keyword.');
+
+  const allowedTables = new Set(Object.keys(TABLE_HINTS).map((t) => t.toLowerCase()));
+  const { refs, ctes } = _tableRefs(sql);
+  for (const ref of refs) {
+    const parts = ref.split('.');
+    const table = parts.pop().toLowerCase();
+    const schema = parts.length ? parts.pop().toLowerCase() : null;
+    if (schema && !ALLOWED_SCHEMAS.has(schema)) {
+      throw new Error(`Query refers to "${schema}", which is not a database this assistant can read.`);
+    }
+    if (!allowedTables.has(table) && !ctes.has(table)) {
+      throw new Error(`Query refers to "${table}", which is not one of the tables available here.`);
+    }
+  }
+
   // Cap rows
   if (!/\blimit\b/i.test(sql)) sql = `${sql} LIMIT ${ROW_CAP}`;
   return sql;
@@ -206,4 +286,4 @@ async function ask(question) {
   return { ok: true, question: q, answer, sql, columns, rows: rows.slice(0, ROW_CAP), rowCount: rows.length, summarized: summarize };
 }
 
-module.exports = { ask, isConfigured, providerInfo };
+module.exports = { ask, isConfigured, providerInfo, _validateSql, _openRO };
