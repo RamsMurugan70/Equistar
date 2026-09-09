@@ -23,7 +23,7 @@
 // just before a rally flatters you and money added before a fall punishes you, neither of
 // which is stock picking. So the same rupees, on the same dates, are simulated into Nifty.
 // The gap is a RUPEE answer to "was my picking worth it", immune to flow timing.
-const { openDatabase, allAsync, closeAsync } = require('../../db/connection');
+const { openDatabase, allAsync, getAsync, closeAsync } = require('../../db/connection');
 const { getNiftyCandles, fetchAndStoreNiftyCandles } = require('../market/niftyService');
 const PF = require('../../config/portfolios');
 
@@ -552,6 +552,15 @@ function mergeOrphanPairs(rows) {
     existing.bought = r2(existing.bought + c.bought);
     existing.sold = r2(existing.sold + c.sold);
     existing.contribution = r2(existing.contribution + c.contribution);
+    // Recomputed from the COMBINED position, not inherited from whichever half was written
+    // first. The whole point of the merge is that the holding and its trades were two records
+    // of one position: before merging, the held half looked like an unexplained disappearance
+    // and the traded half like a sale with nothing behind it, and neither label was true of
+    // the real position.
+    existing.exited = existing.endValue === 0 && existing.sold > 0;
+    existing.basis = existing.endValue === 0 && existing.sold > 0 ? 'BOOKED'
+      : (existing.sold > 0 && existing.endValue > 0 ? 'PART_BOOKED'
+        : (existing.endValue > 0 ? 'ON_PAPER' : 'UNRESOLVED'));
   }
   return { rows: out, inferred };
 }
@@ -725,6 +734,16 @@ async function getEvolution({ period = '3M', portfolios = PF.ALL } = {}) {
         bought: r2(c.bought),
         sold: r2(c.sold),
         exited: c.endValue === 0 && c.sold > 0,
+        // IS THIS MONEY IN THE BANK, OR A PRICE THAT COULD STILL MOVE?
+        //
+        // A closed position's gain is settled. An open position's gain is a quote, and a quote
+        // can be given back in a week. Rendering the two identically invites exactly the wrong
+        // decision — holding a paper winner because it "already made" the money. So every row
+        // states which it is, and a partly-sold position is called out as the mixture it is
+        // rather than being rounded to one or the other.
+        basis: c.endValue === 0 && c.sold > 0 ? 'BOOKED'
+          : (c.sold > 0 && c.endValue > 0 ? 'PART_BOOKED'
+            : (c.endValue > 0 ? 'ON_PAPER' : 'UNRESOLVED')),
         contribution: r2(c.endValue - c.startValue - c.bought + c.sold),
       }));
       const mergedResult = mergeOrphanPairs(contributions);
@@ -741,6 +760,24 @@ async function getEvolution({ period = '3M', portfolios = PF.ALL } = {}) {
 
     const bought = flows.filter((f) => f.side === 'BUY').reduce((s, f) => s + Number(f.value), 0);
     const sold = flows.filter((f) => f.side === 'SELL').reduce((s, f) => s + Number(f.value), 0);
+
+    // How far back the corporate-action record actually reaches, so the caveat below can state
+    // the real boundary. Best-effort: the shared market file may not be attached, and a missing
+    // note is better than a failed page.
+    let corpActionsFrom = null;
+    try {
+      const row = await getAsync(db,
+        'SELECT MIN(ex_date) AS f FROM corporate_actions WHERE ex_date IS NOT NULL');
+      corpActionsFrom = row?.f || null;
+    } catch { /* market data not attached */ }
+
+    // Cost-basis coverage for the same book. Deliberately not fatal: a failure here must not
+    // take down the return figure, it just means the warning cannot be shown.
+    let coverage = null;
+    try {
+      const { assessCoverage } = require('../portfolio/costBasisCoverageService');
+      coverage = await assessCoverage();
+    } catch { /* coverage unavailable */ }
 
     return {
       ok: true,
@@ -795,9 +832,38 @@ async function getEvolution({ period = '3M', portfolios = PF.ALL } = {}) {
           ? `${start.skippedSnapshots + end.skippedSnapshots} snapshot(s) were skipped because `
             + 'their holdings had no prices attached; the nearest fully priced day was used instead.'
           : null,
-        corpActions: 'Split and bonus records begin 2026-05-11; windows starting before that '
-          + 'may contain unadjusted prices.',
+        // Read from the table, never hardcoded. This note used to assert 2026-05-11 as the
+        // start of split and bonus cover; the history has since been backfilled to 2019 and the
+        // sentence stayed behind, which is the failure mode of writing a data boundary into a
+        // string — it is right on the day it is typed and quietly wrong afterwards.
+        corpActions: corpActionsFrom
+          ? (from < corpActionsFrom
+            ? `Split and bonus records begin ${corpActionsFrom}; this window starts ${from}, so `
+              + 'it may contain unadjusted prices.'
+            : `Split and bonus records cover this window (from ${corpActionsFrom}).`)
+          : 'No split or bonus records are loaded, so no price or quantity in this window is '
+            + 'adjusted for corporate actions.',
+        // Said plainly, because "contribution" is read as several different things and only one
+        // of them is correct. It is not opportunity cost, and not profit forgone.
+        meaning: 'Per-stock figures are realised profit and mark-to-market change combined '
+          + '(end value − start value − bought + sold) — what each holding actually did over the '
+          + 'window. They are not opportunity cost or profit missed.',
+        // The headline's own health warning. A book that sold shares it has no purchase record
+        // for cannot produce a complete realised-gain figure, and the reader is told that here
+        // rather than discovering it from a number that looks precise.
+        costBasis: coverage && coverage.incompleteCount
+          ? `Cost basis is incomplete for ${coverage.incompleteCount} symbol(s) `
+            + `(${coverage.shortfalls.slice(0, 3).map((s) => s.symbol).join(', ')}`
+            + `${coverage.incompleteCount > 3 ? ', …' : ''}): more shares were sold than the order `
+            + 'history records buying. Realised gains and capital-gains figures for those symbols '
+            + 'are understated.'
+          : null,
       },
+      // The full per-symbol detail, so a tooltip can name the shortfall and its cause without
+      // the client recomputing any of it.
+      costBasisCoverage: coverage
+        ? { incompleteCount: coverage.incompleteCount, shortfalls: coverage.shortfalls }
+        : null,
     };
   } finally {
     await closeAsync(db);

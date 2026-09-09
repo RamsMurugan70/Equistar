@@ -1114,6 +1114,22 @@ body, input, select, button {
 .evo-contrib-row { display: grid; grid-template-columns: minmax(90px, 1fr) 2fr minmax(76px, auto); align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
 .evo-contrib-sym { font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 5px; }
 .evo-exit-tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; background: var(--bg-hover); color: var(--text-muted); border-radius: 3px; padding: 1px 4px; font-weight: 700; }
+
+/* Booked vs on paper. Deliberately NOT coloured by profit or loss — the bar and the amount
+   already carry that. These say how SETTLED a number is, so a filled tag reads as money in the
+   bank and an outlined one as a price that has not been realised and can still be given back. */
+.evo-basis-tag { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; border-radius: 3px; padding: 1px 4px; font-weight: 700; white-space: nowrap; }
+.evo-basis-tag.booked { background: var(--text-muted); color: var(--bg-card, #fff); }
+.evo-basis-tag.part { background: transparent; color: var(--text-muted); border: 1px solid var(--text-muted); }
+.evo-basis-tag.paper { background: transparent; color: var(--text-muted); border: 1px dashed var(--text-muted); }
+.evo-basis-tag.unresolved { background: transparent; color: var(--text-muted); border: 1px dotted var(--text-muted); font-style: italic; }
+
+/* The cost-basis warning sits WITH the figures it qualifies rather than in a footnote: a
+   realised gain computed over an incomplete purchase history is understated by an unknown
+   amount, and that belongs beside the number, not somewhere the reader has to go looking. */
+.cost-basis-warning { margin-top: 10px; padding: 8px 10px; border-left: 3px solid #b7791f; background: var(--bg-hover); border-radius: 3px; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+.cost-basis-warning strong { color: var(--text-primary); }
+
 .evo-contrib-bar-wrap { background: var(--bg-hover); border-radius: 3px; height: 8px; overflow: hidden; }
 .evo-contrib-bar { display: block; height: 100%; border-radius: 3px; }
 .evo-contrib-bar.pos { background: #05664a; }

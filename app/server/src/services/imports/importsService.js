@@ -83,11 +83,27 @@ async function getLatestImportRun() {
   return importsRepository.findLatestImportRun();
 }
 
+// MUST be keyed on the NORMALISED symbol, because that is what insertOrders stores.
+//
+// This was the duplicate bug. insertOrders writes resolveNseSymbol(order.symbol) — so an ICICI
+// row arrives as FIRSOU and is stored as FSL. The key built from the incoming order therefore
+// read FIRSOU while the key built from the stored row read FSL, the two never matched, and the
+// row was re-inserted on every single sync. Only the stocks whose broker code differs from the
+// NSE symbol were affected, which is why it hid for so long: 18 of 20 rows in a re-import
+// skipped correctly and the 2 remapped ones silently doubled.
+//
+// Required lazily for the same reason importsRepository does it: portfolioService pulls in
+// repositories of its own and a top-level require here closes that loop.
+function normalizeSymbolForKey(symbol) {
+  const { resolveNseSymbol } = require('../portfolio/portfolioService');
+  return String(resolveNseSymbol(symbol) || symbol || '').toUpperCase();
+}
+
 function buildOrderTupleKey(portfolio, order) {
   return [
     portfolio,
     order.tradeDate,
-    order.symbol,
+    normalizeSymbolForKey(order.symbol),
     order.side,
     Number(order.quantity || 0),
     Number(order.price || 0),
@@ -114,12 +130,25 @@ async function importMissingOrders({ portfolio, fileName, orders }) {
         .map((row) => String(row.legacy_order_id || '').trim())
         .filter(Boolean)
     );
+    // The broker's own order id is the ONLY provable re-import marker: two rows carrying it are
+    // the same fill seen twice, whereas two rows sharing a natural key are usually a genuine
+    // repeat fill (one stock bought at one price several times in a day). Checked first, and
+    // separately, so the tuple pass below never has to guess about rows that carry one.
+    const existingBrokerOrderIds = new Set(
+      existingRows
+        .map((row) => String(row.broker_order_id || '').trim())
+        .filter(Boolean)
+    );
+
     const tupleCounts = new Map();
     for (const row of existingRows) {
+      // Normalised on BOTH sides. The stored symbol is already normalised for rows written by
+      // the current importer, but rows imported before that existed sit under the raw broker
+      // code — and resolveNseSymbol is idempotent, so passing an already-NSE symbol is a no-op.
       const key = [
         portfolio,
         row.trade_date,
-        row.symbol,
+        normalizeSymbolForKey(row.symbol),
         row.side,
         Number(row.quantity || 0),
         Number(row.price || 0),
@@ -132,6 +161,12 @@ async function importMissingOrders({ portfolio, fileName, orders }) {
     let skipped = 0;
 
     for (const order of orders) {
+      const brokerOrderId = String(order.brokerOrderId || '').trim();
+      if (brokerOrderId && existingBrokerOrderIds.has(brokerOrderId)) {
+        skipped += 1;
+        continue;
+      }
+
       const tradeId = String(order.tradeId || '').trim();
       if (tradeId && existingTradeIds.has(tradeId)) {
         skipped += 1;
@@ -147,19 +182,29 @@ async function importMissingOrders({ portfolio, fileName, orders }) {
       }
 
       toInsert.push(order);
+      // Both ids are recorded as the batch is walked, so a file that repeats a row inside
+      // itself is caught too — not only a file replayed against what is already stored.
+      if (brokerOrderId) {
+        existingBrokerOrderIds.add(brokerOrderId);
+      }
       if (tradeId) {
         existingTradeIds.add(tradeId);
       }
     }
 
     const result = await importsRepository.insertOrders(portfolio, toInsert);
+    // Rows the unique index refused are added to the skip count rather than left unaccounted
+    // for. In practice this should stay zero — the checks above catch a replay first — so a
+    // non-zero value is a signal that something reached the writer the service did not expect,
+    // and it must not be able to hide by making seen ≠ inserted + skipped.
+    const totalSkipped = skipped + (result.skipped || 0);
     await importsRepository.finalizeImportRun(
       run.id,
       'COMPLETED',
       {
         rowsSeen,
         rowsInserted: result.inserted,
-        rowsSkipped: skipped,
+        rowsSkipped: totalSkipped,
       },
       JSON.stringify({ portfolio, tradeDates, fileName })
     );
@@ -169,7 +214,7 @@ async function importMissingOrders({ portfolio, fileName, orders }) {
       portfolio,
       rowsSeen,
       rowsInserted: result.inserted,
-      rowsSkipped: skipped,
+      rowsSkipped: totalSkipped,
       tradeDates,
     };
   } catch (error) {

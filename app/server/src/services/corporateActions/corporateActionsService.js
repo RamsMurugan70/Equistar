@@ -139,6 +139,100 @@ async function refreshCorporateActions(days = 45) {
   return { fetched: rows.length, saved };
 }
 
+// ── Public: backfill the historical record, year by year ──────────────────────
+//
+// WHY THIS EXISTS. refreshCorporateActions above keeps a rolling 45-day window, so the table
+// only ever knew about the recent past — it began at 2026-05-11 while the oldest orders on file
+// are from 2019. Every split and bonus before that date was invisible, which is not a cosmetic
+// gap: FIFO then matches a post-split sell quantity against pre-split buy lots and concludes
+// more shares were sold than were ever bought. The scale factors were always computed correctly
+// (see market/corpActionsService priceScaleFactor); they were simply never given the rows.
+//
+// A YEAR PER REQUEST. NSE serves a full calendar year in one call (2,325 rows for 2021), and
+// chunking finer only multiplies requests against a rate-limited endpoint. Chunking coarser
+// than a year was not tested and is not assumed.
+//
+// Idempotent: UNIQUE(symbol, subject, ex_date) plus INSERT OR IGNORE, so a re-run adds only
+// what is missing and a half-finished run can simply be repeated.
+//
+// NSE, NOT YAHOO, and the difference is not academic. Yahoo reports BAJFINANCE's 16-Jun-2025
+// event as a bare 2.0 split; NSE returns "Face Value Split ... From Rs 2/- To Re 1/-" AND
+// "Bonus 4:1" as two rows, which multiply to the true 10x. A Yahoo backfill would write a 2x
+// adjustment and be wrong by a factor of five on every lot held across that date.
+async function backfillCorporateActions({ fromYear = 2019, toYear = null, onProgress = null } = {}) {
+  const endYear = toYear || new Date().getFullYear();
+  if (fromYear > endYear) throw new Error(`fromYear ${fromYear} is after toYear ${endYear}`);
+
+  let cookies = await _fetchNseCookies();
+  if (!cookies) throw new Error('Could not get NSE session cookies');
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const perYear = [];
+  let totalFetched = 0;
+  let totalSaved = 0;
+
+  for (let year = fromYear; year <= endYear; year += 1) {
+    const from = new Date(Date.UTC(year, 0, 1));
+    // Only the CALENDAR year stops at today — not merely the last year of the loop. Keying this
+    // off `endYear` instead meant `--to 2019` asked NSE for 01-01-2019 to today and got all
+    // seven years back in one response, which still imported correctly but made the per-year
+    // counts meaningless as a check on coverage.
+    const to = year === new Date().getFullYear()
+      ? new Date()
+      : new Date(Date.UTC(year, 11, 31));
+
+    let rows = await _fetchNseActions(from, to, cookies);
+
+    // An empty year part-way through a long run usually means the session was dropped, not
+    // that the year was genuinely quiet. Re-handshake once and retry before believing it.
+    if (!Array.isArray(rows) || !rows.length) {
+      cookies = await _fetchNseCookies();
+      await new Promise((r) => setTimeout(r, 2000));
+      rows = await _fetchNseActions(from, to, cookies);
+    }
+
+    let saved = 0;
+    if (Array.isArray(rows) && rows.length) {
+      const db = openDatabase();
+      try {
+        await runAsync(db, 'BEGIN TRANSACTION');
+        for (const r of rows) {
+          if (!r.symbol || !r.subject) continue;
+          const result = await runAsync(db,
+            `INSERT OR IGNORE INTO corporate_actions
+              (symbol, isin, company, action_type, subject, ex_date, record_date, face_value, source, fetched_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NSE', CURRENT_TIMESTAMP)`,
+            [String(r.symbol).toUpperCase(), r.isin || null, r.comp || null,
+              _classifyAction(r.subject), r.subject,
+              _parseDate(r.exDate), _parseDate(r.recDate), r.faceVal || null]
+          );
+          // Counted from what the write actually changed, not from rows seen, so the reported
+          // figure distinguishes "added" from "already had it" instead of flattering the run.
+          if (result?.changes) saved += result.changes;
+        }
+        await runAsync(db, 'COMMIT');
+      } catch (e) {
+        await runAsync(db, 'ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        await closeAsync(db);
+      }
+    }
+
+    const fetched = Array.isArray(rows) ? rows.length : 0;
+    totalFetched += fetched;
+    totalSaved += saved;
+    perYear.push({ year, fetched, saved });
+    if (onProgress) onProgress({ year, fetched, saved });
+
+    // Deliberate pause between calls. This is someone else's public endpoint and the whole
+    // backfill is a handful of requests — there is no reason to be impolite about it.
+    if (year < endYear) await new Promise((r) => setTimeout(r, 3000));
+  }
+
+  return { fromYear, toYear: endYear, fetched: totalFetched, saved: totalSaved, perYear };
+}
+
 // ── Public: get actions for held symbols (upcoming + recent) ──────────────────
 async function getActionsForSymbols(symbols, daysBefore = 14, daysAfter = 30) {
   if (!symbols || !symbols.length) return [];
@@ -190,4 +284,6 @@ async function getInsightActions(heldSymbols) {
   }
 }
 
-module.exports = { refreshCorporateActions, getActionsForSymbols, getInsightActions };
+module.exports = {
+  refreshCorporateActions, backfillCorporateActions, getActionsForSymbols, getInsightActions,
+};

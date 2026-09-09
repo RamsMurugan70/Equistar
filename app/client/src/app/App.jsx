@@ -6320,16 +6320,29 @@ function inrShort(value) {
 
 const EVOLUTION_PERIODS = ['1M', '2M', '3M', '6M', '1Y'];
 
+// Money in the bank versus a price that can still move. The distinction drives real decisions —
+// a paper winner held because it "already made" the money is the mistake this label exists to
+// prevent — so it is stated on every row rather than only on the closed ones.
+const BASIS_TAG = {
+  BOOKED: { label: 'booked', cls: 'booked', title: 'Position fully closed in this period — this gain or loss is realised and settled.' },
+  PART_BOOKED: { label: 'part booked', cls: 'part', title: 'Partly sold: some of this is realised, the rest is still held and can still move.' },
+  ON_PAPER: { label: 'on paper', cls: 'paper', title: 'Still held. This is price movement only — nothing has been realised and it can still evaporate.' },
+  UNRESOLVED: { label: 'unresolved', cls: 'unresolved', title: 'This position left the book without a matching sale in the order history, so it cannot be classified.' },
+};
+
 function ContributionRow({ row, max }) {
   const positive = row.contribution >= 0;
   // Bar width is relative to the biggest mover shown, so the shape of the period reads at a
   // glance — one dominant winner looks different from ten even ones.
   const width = max > 0 ? Math.max(2, (Math.abs(row.contribution) / max) * 100) : 0;
+  // Falls back to the older boolean so a cached response from before `basis` existed still
+  // renders something truthful rather than an empty tag.
+  const tag = BASIS_TAG[row.basis] || (row.exited ? BASIS_TAG.BOOKED : null);
   return (
     <div className="evo-contrib-row">
       <span className="evo-contrib-sym">
         {row.symbol}
-        {row.exited && <span className="evo-exit-tag" title="Position fully closed in this period">exited</span>}
+        {tag && <span className={`evo-basis-tag ${tag.cls}`} title={tag.title}>{tag.label}</span>}
       </span>
       <span className="evo-contrib-bar-wrap">
         <span className={`evo-contrib-bar ${positive ? 'pos' : 'neg'}`} style={{ width: `${width}%` }} />
@@ -6496,6 +6509,37 @@ function PortfolioEvolutionPanel() {
               ? <p className="evo-muted">Nothing lost money this period.</p>
               : data.worst.map((r) => <ContributionRow key={r.symbol} row={r} max={maxMove} />)}
           </div>
+        </div>
+      )}
+
+      {/* States what these figures ARE, next to them. "Contribution" gets read as opportunity
+          cost or profit forgone; it is neither. */}
+      {movers.length > 0 && data.notes?.meaning && (
+        <p className="evo-muted evo-meaning">{data.notes.meaning}</p>
+      )}
+
+      {/* Cost-basis shortfall, beside the numbers it undermines rather than buried in the notes
+          drawer. Naming the symbols and the cause is the difference between a warning someone
+          can act on and one they learn to scroll past. */}
+      {data.costBasisCoverage?.incompleteCount > 0 && (
+        <div className="cost-basis-warning">
+          <strong>Cost basis incomplete for {data.costBasisCoverage.incompleteCount} symbol(s).</strong>{' '}
+          More shares were sold than the order history records buying, compared in today&apos;s share
+          terms. Realised gains, cost basis and capital-gains figures for these are understated,
+          and cannot be completed from this data — the missing purchases were never reported as
+          trades.
+          <ul>
+            {data.costBasisCoverage.shortfalls.slice(0, 6).map((s) => (
+              <li key={s.symbol} title={s.reason}>
+                <strong>{s.symbol}</strong> — {s.shortfall} share(s) short
+                {' '}({s.cause === 'NO_PURCHASE_RECORDED' ? 'no purchase on record' : 'history starts too late'})
+                {s.actionsApplied?.length > 0 && ` · adjusted for ${s.actionsApplied.join(', ')}`}
+                {s.adjustmentBlocked && ' · a corporate action here could not be quantified'}
+              </li>
+            ))}
+          </ul>
+          {data.costBasisCoverage.shortfalls.length > 6
+            && <span>…and {data.costBasisCoverage.shortfalls.length - 6} more.</span>}
         </div>
       )}
 
