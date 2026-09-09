@@ -13,6 +13,9 @@ router.post('/import-downloads', controller.importPortfoliosFromDownloads);
 
 // Cost basis overrides — must come before any wildcard routes
 router.get('/cost-basis',                          costBasisController.getOverrides);
+// Distinct from the overrides list above: this reports where a cost basis is MISSING and cannot
+// be reconstructed from the order history, rather than where one has been supplied by hand.
+router.get('/cost-basis/coverage',                 costBasisController.getCoverage);
 router.post('/cost-basis',                         costBasisController.importOverrides);
 router.delete('/cost-basis/:portfolio/:symbol',    costBasisController.removeOverride);
 

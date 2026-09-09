@@ -11,6 +11,28 @@ async function getOverrides(req, res) {
 }
 
 /**
+ * GET /api/portfolio/cost-basis/coverage
+ *
+ * Where the order history cannot support a cost basis, and why. Deliberately separate from the
+ * overrides above, because the two answer opposite questions: an override is a cost the user
+ * supplied, whereas this is the set of positions where nobody has supplied one and FIFO has
+ * nothing to work with. Its own endpoint so any screen showing realised gains, cost basis or
+ * capital gains can carry the warning without recomputing it.
+ */
+async function getCoverage(req, res) {
+  try {
+    const { assessCoverage } = require('../services/portfolio/costBasisCoverageService');
+    const result = await assessCoverage({ portfolio: req.query.portfolio || null });
+    // bySymbol is a Map and exists for in-process callers; JSON.stringify would silently emit
+    // {} for it, which reads as "nothing found" rather than "not serialised".
+    const { bySymbol, ...serialisable } = result;
+    res.json(serialisable);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+/**
  * POST /api/portfolio/cost-basis
  * Body: { portfolio, overrides: [{ symbol, avgCost, qty, asOfDate, notes }] }
  * Or single: { portfolio, symbol, avgCost, qty, asOfDate, notes }
@@ -73,4 +95,4 @@ async function removeOverride(req, res) {
   }
 }
 
-module.exports = { getOverrides, importOverrides, removeOverride };
+module.exports = { getOverrides, getCoverage, importOverrides, removeOverride };
