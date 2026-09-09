@@ -94,7 +94,7 @@ async function listExistingOrdersForPortfolioDates(portfolio, tradeDates) {
     const placeholders = tradeDates.map(() => '?').join(', ');
     return allAsync(
       db,
-      `SELECT id, legacy_order_id, trade_date, portfolio, symbol, side, quantity, price, exchange
+      `SELECT id, legacy_order_id, broker_order_id, trade_date, portfolio, symbol, side, quantity, price, exchange
        FROM orders
        WHERE portfolio = ?
          AND trade_date IN (${placeholders})`,
@@ -131,10 +131,39 @@ async function ensureBrokerSymbolColumn(db) {
   }
 }
 
+// The last line of defence against re-imported fills, enforced by the database rather than by
+// the importer remembering to check.
+//
+// PARTIAL, and that is the whole design. Only rows carrying a broker id are constrained; CSV
+// and historical rows have none, and a plain UNIQUE would drag every one of them into the same
+// index to compete over an absent value. Confining it to `WHERE broker_order_id IS NOT NULL`
+// keeps the guarantee exactly where the evidence is — one broker id, one fill — and leaves
+// everything else free to hold as many genuine repeat fills as the tradebook actually records.
+//
+// Failure is logged, NOT thrown. A book that still holds duplicates would otherwise crash the
+// app at boot, taking down every screen over a data defect that has a dedicated cleanup script
+// (scripts/dedupeBrokerOrders.js). Losing the constraint is bad; losing the whole app is worse,
+// and the warning names the fix.
+async function ensureBrokerOrderIdIndex(db) {
+  try {
+    await runAsync(db, `
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_orders_broker_order_id
+        ON orders (broker_order_id)
+        WHERE broker_order_id IS NOT NULL`);
+  } catch (err) {
+    console.warn(`⚠ could not create ux_orders_broker_order_id: ${err.message}`);
+    console.warn('  Duplicate broker_order_id rows are present. Run: '
+      + 'node src/scripts/dedupeBrokerOrders.js --db <app.db> --apply');
+  }
+}
+
 async function ensureOrderColumns() {
   return withDatabase(async (db) => {
     await ensureTradeTimeColumn(db);
     await ensureBrokerSymbolColumn(db);
+    // After the columns, never before — the index names a column that older databases only
+    // acquire in the call above.
+    await ensureBrokerOrderIdIndex(db);
   });
 }
 
@@ -149,19 +178,27 @@ async function insertOrders(portfolio, orders) {
     // import failed with 'no column named trade_time' and silently saved nothing.
     await ensureTradeTimeColumn(db);
     await ensureBrokerSymbolColumn(db);
+    await ensureBrokerOrderIdIndex(db);
     // Required lazily: portfolioService pulls in repositories of its own, and a top-level
     // require here closes that loop. Same reason ordersService defers it.
     const { resolveNseSymbol } = require('../services/portfolio/portfolioService');
     await runAsync(db, 'BEGIN TRANSACTION');
     try {
       let inserted = 0;
+      let skipped = 0;
 
       for (const order of orders) {
-        await runAsync(
+        // ON CONFLICT DO NOTHING pairs with the partial unique index above: a fill already on
+        // record under the same broker id is skipped instead of raising, so one replayed row
+        // can no longer abort an otherwise good import of ninety-nine new ones. Rows without a
+        // broker id are outside the index and so are never suppressed by it — a CSV's genuine
+        // repeat fills still insert, every one of them.
+        const res = await runAsync(
           db,
           `INSERT INTO orders
             (legacy_order_id, trade_date, trade_time, broker_order_id, portfolio, symbol, broker_symbol, side, quantity, price, exchange, charges, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT DO NOTHING`,
           [
             order.tradeId ? Number(order.tradeId) || null : null,
             order.tradeDate,
@@ -190,11 +227,14 @@ async function insertOrders(portfolio, orders) {
             new Date().toISOString(),
           ]
         );
-        inserted += 1;
+        // Counted from what the database actually did, not from what was attempted. Returning
+        // orders.length here would report a clean import of rows the index had just rejected,
+        // which is the same class of lie the duplicate bug produced in the first place.
+        if (res?.changes) inserted += 1; else skipped += 1;
       }
 
       await runAsync(db, 'COMMIT');
-      return { inserted };
+      return { inserted, skipped };
     } catch (error) {
       await runAsync(db, 'ROLLBACK');
       throw error;
