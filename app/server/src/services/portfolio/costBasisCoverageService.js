@@ -106,6 +106,23 @@ async function assessCoverage({ portfolio = null } = {}) {
     const actions = await quantityActionsBySymbol(db);
     const { resolveNseSymbol } = require('./portfolioService');
 
+    // Renames are folded in before anything is counted, or a stock that changed ticker mid-book
+    // reports twice: a phantom long under the old name and an impossible negative under the new
+    // one, neither of which is a real cost-basis gap. Only doubly-confirmed pairs come back from
+    // this — NSE's master plus quantities that actually offset in this book — so applying it
+    // here needs no further judgement. Best-effort: a missing rename master must not take down
+    // the coverage report, it just means renames are not folded in.
+    let renameMap = new Map();
+    let renamesApplied = [];
+    let renamesNeedingReview = [];
+    try {
+      const { buildRenameMap } = require('./symbolRenameService');
+      const r = await buildRenameMap({ portfolio });
+      renameMap = r.map;
+      renamesApplied = r.applied;
+      renamesNeedingReview = r.needsReview;
+    } catch { /* rename master unavailable */ }
+
     const params = [];
     let where = '';
     if (portfolio) { where = 'WHERE portfolio = ?'; params.push(portfolio); }
@@ -117,9 +134,12 @@ async function assessCoverage({ portfolio = null } = {}) {
       const raw = String(o.symbol || '');
       // F&O descriptors carry spaces ("NIFTY 08Sep26 23850 PE") and are not equity positions.
       if (!raw || raw.includes(' ')) continue;
-      // Resolved first: a broker code is the stock's alias TODAY, so it must collapse to the
-      // NSE symbol before any quantity is compared, or one position reads as two.
-      const sym = String(resolveNseSymbol(raw) || raw).toUpperCase();
+      // Broker code first, THEN the rename — the order is not interchangeable. A broker code is
+      // the stock's alias today; a rename is the stock's identity changing over time, and it is
+      // stated in NSE symbols, so it can never match a broker's private code. Resolve the other
+      // way round and a stock with both an alias and a rename is missed entirely.
+      const nse = String(resolveNseSymbol(raw) || raw).toUpperCase();
+      const sym = renameMap.get(nse) || nse;
 
       if (!bySymbol.has(sym)) {
         bySymbol.set(sym, {
@@ -175,6 +195,13 @@ async function assessCoverage({ portfolio = null } = {}) {
       shortfalls,
       bySymbol,
       tolerance: TOLERANCE,
+      // Reported, not just used. A rename silently merging two rows into one changes what the
+      // reader sees, so what was merged — and on what evidence — has to be inspectable.
+      renamesApplied,
+      // Pairs NSE lists and this book trades, whose quantities do not tell a rename's story.
+      // Neither merged nor dropped: they usually mean the order history has a gap, which is a
+      // different problem, and merging would bury it.
+      renamesNeedingReview,
       note: shortfalls.length
         ? `${shortfalls.length} symbol(s) have sold more shares than the order history records `
           + 'buying, compared in today\'s share terms. Realised gain, cost basis and capital-gains '
