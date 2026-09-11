@@ -24,6 +24,10 @@ kite_config.json
 .env.*
 !.env.example
 
+# Live deployment values (IP, project, hostname) kept beside the public runbook. This repository
+# is public; the placeholders in RUNBOOK-gcp.md are the committed version.
+*.local.md
+
 # Logs and scratch
 *.log
 logs/
