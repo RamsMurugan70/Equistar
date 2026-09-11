@@ -21,6 +21,7 @@
 // corporate action. Note that it cuts both ways: a genuine 1-share shortfall sitting under a 1:1
 // bonus is a 2-share shortfall today, so restating can make a gap larger as well as smaller.
 const { openDatabase, allAsync, closeAsync } = require('../../db/connection');
+const { isFno } = require('../../utils/tradeClassification');
 
 // Rounding noise, partial-fill dust and the odd fractional bonus entitlement all produce
 // sub-share discrepancies that are not worth a warning. One share is the floor for a real case.
@@ -127,13 +128,15 @@ async function assessCoverage({ portfolio = null } = {}) {
     let where = '';
     if (portfolio) { where = 'WHERE portfolio = ?'; params.push(portfolio); }
     const orders = await allAsync(db,
-      `SELECT trade_date, portfolio, symbol, side, quantity FROM orders ${where}`, params);
+      `SELECT trade_date, portfolio, symbol, side, quantity, exchange FROM orders ${where}`, params);
 
     const bySymbol = new Map();
     for (const o of orders) {
       const raw = String(o.symbol || '');
-      // F&O descriptors carry spaces ("NIFTY 08Sep26 23850 PE") and are not equity positions.
-      if (!raw || raw.includes(' ')) continue;
+      // F&O is not an equity position. Decided by isFno — exchange, then contract shape — rather
+      // than by looking for a space, which a contract code stored without spaces would pass and
+      // then be assessed as an equity with a cost basis to cover.
+      if (!raw || isFno(o)) continue;
       // Broker code first, THEN the rename — the order is not interchangeable. A broker code is
       // the stock's alias today; a rename is the stock's identity changing over time, and it is
       // stated in NSE symbols, so it can never match a broker's private code. Resolve the other

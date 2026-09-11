@@ -5,6 +5,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "test": "node --test \"test/**/*.test.js\"",
     "migrate:db": "node src/db/migrations/runMigrations.js",
     "migrate:legacy": "node src/services/migration/runLegacyMigration.js"
   },

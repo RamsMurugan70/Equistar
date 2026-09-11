@@ -7,6 +7,7 @@ const portfolioRepository = require('../../repositories/portfolioRepository');
 const { resolveNseSymbol } = require('../portfolio/portfolioService');
 const { openDatabase, allAsync, closeAsync } = require('../../db/connection');
 const { ownsMarketData } = require('../../db/marketSchema');
+const { EQUITY_ONLY_SQL } = require('../../utils/tradeClassification');
 
 const ENGINES = require('../../config/engines');
 
@@ -192,6 +193,9 @@ async function _heldBySymbol() {
               SUM(CASE WHEN UPPER(side) IN ('SELL','S') THEN quantity ELSE 0 END) AS net_qty
          FROM orders
         WHERE UPPER(side) IN ('BUY','B','SELL','S')
+          -- EQUITY ONLY. An option bought and left to expire never shows a closing fill, so it
+          -- would sit in this "held" set forever as a phantom holding.
+          AND ${EQUITY_ONLY_SQL}
         GROUP BY portfolio, symbol
        HAVING net_qty > 0`
     );

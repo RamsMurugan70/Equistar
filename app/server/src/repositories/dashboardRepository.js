@@ -1,6 +1,7 @@
 const fs = require('fs');
 const { openDatabase, getAsync, allAsync, closeAsync } = require('../db/connection');
 const { getInsightActions } = require('../services/corporateActions/corporateActionsService');
+const { EQUITY_ONLY_SQL } = require('../utils/tradeClassification');
 
 // Shared NSE/BSE holiday list (same file the Optix workflow status reads) — used to
 // tell the Dashboard's Portfolio Pulse lists when to show a flat "market closed today"
@@ -52,6 +53,10 @@ async function getDashboardSummary() {
                * SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END)
                AS computed_per_symbol
              FROM orders
+             -- EQUITY ONLY. An option bought and left to expire stays net-long here forever
+             -- (the broker never reports its expiry-day square-off), and would be counted as
+             -- invested money for any portfolio whose snapshot carries no cost basis.
+             WHERE ${EQUITY_ONLY_SQL}
              GROUP BY portfolio, symbol
              HAVING SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) > 0
            ),
@@ -95,6 +100,7 @@ async function getDashboardSummary() {
                * SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END)
                AS computed_invested_per_symbol
              FROM orders
+             WHERE ${EQUITY_ONLY_SQL}   -- equity only; see the totals query above
              GROUP BY portfolio, symbol
              HAVING SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) > 0
            ),

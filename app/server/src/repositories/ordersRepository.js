@@ -1,4 +1,5 @@
 const { openDatabase, allAsync, getAsync, closeAsync } = require('../db/connection');
+const { EQUITY_ONLY_SQL } = require('../utils/tradeClassification');
 
 async function withDatabase(work) {
   const db = openDatabase();
@@ -90,6 +91,10 @@ async function listSoldSymbols() {
          MAX(trade_date) AS last_sell_date
        FROM orders
        WHERE side = 'SELL'
+         -- EQUITY ONLY. These three lists feed the sell evaluator, which judges each sale as
+         -- an equity exit. Every short-option ENTRY is a SELL, so without this each written
+         -- option was offered for evaluation as though a stock had been sold.
+         AND ${EQUITY_ONLY_SQL}
        GROUP BY portfolio, symbol
        ORDER BY portfolio, symbol`
     )
@@ -144,7 +149,7 @@ async function listSellDates() {
       db,
       `SELECT trade_date AS sale_date, COUNT(*) AS sell_count
        FROM orders
-       WHERE side = 'SELL'
+       WHERE side = 'SELL' AND ${EQUITY_ONLY_SQL}   -- equity only; see listSoldSymbols
        GROUP BY trade_date
        ORDER BY trade_date DESC`
     )
@@ -158,6 +163,7 @@ async function listSoldSymbolsForDate(saleDate) {
       `SELECT DISTINCT portfolio, symbol
        FROM orders
        WHERE side = 'SELL' AND trade_date = ?
+         AND ${EQUITY_ONLY_SQL}   -- equity only; see listSoldSymbols
        ORDER BY portfolio, symbol`,
       [saleDate]
     )
@@ -195,6 +201,11 @@ async function getAvgCostBySymbol(portfolio, beforeDate = null) {
          MAX(CASE WHEN side = 'BUY' THEN trade_date END) AS last_buy_date
        FROM orders
        WHERE portfolio = ? ${dateClause}
+         -- EQUITY ONLY. The broker never reports its expiry-day auto square-off, so an option
+         -- bought and left to expire keeps a positive net_qty here forever. Every caller treats
+         -- a row from this function as an equity holding: cost injection into the portfolio
+         -- view, the held-from-orders list, and a symbol's position lookup.
+         AND ${EQUITY_ONLY_SQL}
        GROUP BY symbol
        HAVING net_qty > 0
        ORDER BY symbol`,
