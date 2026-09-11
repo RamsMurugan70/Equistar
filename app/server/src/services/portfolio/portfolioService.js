@@ -70,7 +70,16 @@ const ICICI_TO_NSE = {
   EDEFIN: 'EDELWEISS',     // Edelweiss Financial Services. broker 121.98 vs 122.67 (0.57%).
   TATCOV: 'TMCV',          // Tata Motors (commercial vehicles) post-demerger. broker 474.30 vs
                            // TMCV 470.40 (0.82%); TMPV was 30% away, so definitively the CV arm.
-  ICIPSE: 'ICICISILVE',
+  // ICICI Pru Silver ETF. SILVERIETF is the real NSE ticker (Yahoo quotes it); the earlier
+  // 'ICICISILVE' is not a listed symbol at all — Yahoo 404s it — so nothing could price this
+  // holding. Same fix as ICIGOL/ICINIF above.
+  ICIPSE: 'SILVERIETF',
+  // Verified 2026-09-11 the same way, and exactly: the 2026-09-05 snapshot's broker LTP equals
+  // the NSE close of 2026-09-04 to the paisa for all three (and ICIPSE 232.48 = SILVERIETF).
+  // Unmapped, all three showed as unpriced holdings in the Stock Performance report.
+  VATWAB: 'WABAG',         // VA Tech Wabag. 2005.30 = 2005.30.
+  NEWIN:  'NIACL',         // New India Assurance. 229.91 = 229.91.
+  OILIND: 'OIL',           // Oil India. 488.30 = 488.30.
   NIFBEE: 'NIFTYBEES',
   NIFJUN: 'JUNIORBEES',
   ZEROGE: 'GOLDCASE',
@@ -770,6 +779,7 @@ async function getCurrentHoldingSymbols() {
     for (const h of holdings) {
       const sym = (resolveNseSymbol(h.instrument) || h.instrument).toUpperCase();
       holdingsBySymbol[sym] = {
+        instrument: h.instrument,   // the broker's own code, for explaining an unpriced holding
         quantity: Number(h.qty || 0),
         avgCost: Number(h.avgCost || 0),
         ltp: Number(h.ltp || 0),

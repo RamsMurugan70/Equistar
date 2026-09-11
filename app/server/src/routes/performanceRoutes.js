@@ -8,5 +8,6 @@ router.get('/trend',   controller.getTrend);
 router.get('/trend-report', controller.getTrendReport);
 router.get('/order-impact', controller.getOrderImpact);
 router.get('/evolution', controller.getPortfolioEvolution);
+router.get('/stocks', controller.getStockPerformance);
 
 module.exports = router;

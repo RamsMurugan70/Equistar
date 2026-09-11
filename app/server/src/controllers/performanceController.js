@@ -67,6 +67,18 @@ async function getPortfolioEvolution(req, res, next) {
   } catch (error) { next(error); }
 }
 
+// Per-stock performance of current holdings over 1M/3M/6M/1Y, with RSI/EMA and a ranked score.
+// Anything but a known period or one of this participant's portfolio names falls back to the
+// default rather than reaching the service.
+async function getStockPerformance(req, res, next) {
+  try {
+    const svc = require('../services/performance/stockPerformanceService');
+    const period = Object.keys(svc.PERIOD_MONTHS).includes(req.query.period) ? req.query.period : '3M';
+    const portfolio = PF.ALL.includes(req.query.portfolio) ? req.query.portfolio : 'both';
+    res.json(await svc.getStockPerformance({ period, portfolio }));
+  } catch (error) { next(error); }
+}
+
 module.exports = {
-  getPerformance, getTrend, getTrendReport, getOrderImpact, getPortfolioEvolution,
+  getPerformance, getTrend, getTrendReport, getOrderImpact, getPortfolioEvolution, getStockPerformance,
 };

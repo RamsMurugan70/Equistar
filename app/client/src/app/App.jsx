@@ -20,6 +20,7 @@ import {
   fetchSymbolTechnicals,
   fetchSymbol52wBatch,
   fetchPerformance,
+  fetchStockPerformance,
   fetchInvestmentTrendReport,
   refreshScores,
   refreshAllScores,
@@ -5978,6 +5979,221 @@ function TradeImpactPanel() {
   );
 }
 
+// ── Stock Performance: how each holding has actually done over a window ──────
+// The stocks' own total return (split/bonus-adjusted, dividends included) for what is held now,
+// beside the momentum picture. Deliberately NOT the user's P&L — that lives in Portfolio
+// Evolution; this is "which of my holdings are pulling their weight", the rebalancing question.
+const SP_PERIODS = ['1M', '3M', '6M', '1Y'];
+const SP_SORTS = [
+  ['score', 'Performance score'], ['returnPct', 'Return'], ['vsNiftyPct', 'vs Nifty'],
+  ['riskAdj', 'Risk-adjusted'], ['maxDrawdownPct', 'Max drawdown'], ['rsi', 'RSI'],
+  ['ema200Pct', 'vs 200 EMA'], ['from52wHighPct', 'From 52W high'], ['weightPct', 'Weight'], ['symbol', 'Symbol'],
+];
+// Keys where "best first" means ascending.
+const SP_ASC_FIRST = new Set(['symbol']);
+
+function SpPct({ v, suffix = '%', digits = 1 }) {
+  if (v == null) return <span className="sp-muted">—</span>;
+  const cls = v > 0 ? 'sp-pos' : v < 0 ? 'sp-neg' : '';
+  return <span className={cls}>{v > 0 ? '+' : v < 0 ? '−' : ''}{Math.abs(v).toFixed(digits)}{suffix}</span>;
+}
+
+function StockPerformancePanel() {
+  const navigate = useNavigate();
+  const [period, setPeriod] = useState('3M');
+  const [portfolio, setPortfolio] = useState('both');
+  const [sortBy, setSortBy] = useState('score');
+  const [sortDir, setSortDir] = useState('desc');
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    setBusy(true); setErr('');
+    fetchStockPerformance({ period, portfolio })
+      .then((d) => { if (alive) setData(d); })
+      .catch((e) => { if (alive) setErr(e.message); })
+      .finally(() => { if (alive) setBusy(false); });
+    return () => { alive = false; };
+  }, [period, portfolio]);
+
+  const rows = useMemo(() => {
+    const list = [...(data?.rows || [])];
+    const dir = sortDir === 'asc' ? 1 : -1;
+    list.sort((a, b) => {
+      // A holding with no price sinks whatever the key or direction — a missing number is not a
+      // low one, and weight or symbol alone must not float it back up among the priced rows.
+      if (!!a.noData !== !!b.noData) return a.noData ? 1 : -1;
+      if (sortBy === 'symbol') return dir * String(a.symbol).localeCompare(String(b.symbol));
+      const av = a[sortBy]; const bv = b[sortBy];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return dir * (av - bv);
+    });
+    return list;
+  }, [data, sortBy, sortDir]);
+
+  const chooseSort = (key) => { setSortBy(key); setSortDir(SP_ASC_FIRST.has(key) ? 'asc' : 'desc'); };
+  const clickSort = (key) => {
+    if (sortBy === key) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else chooseSort(key);
+  };
+  const Th = ({ k, children, title, align = 'right' }) => (
+    <th scope="col" title={title} onClick={() => clickSort(k)} className="sp-th sp-th-sort" style={{ textAlign: align }}
+      aria-sort={sortBy === k ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}>
+      {children}{sortBy === k ? (sortDir === 'desc' ? ' ▼' : ' ▲') : ''}
+    </th>
+  );
+
+  const s = data?.summary;
+  const portfolios = data?.portfolios || [];
+  const unpriced = data?.noData || [];
+  return (
+    <section className="sp-panel">
+      <div className="sp-head">
+        <h2>📊 Stock Performance</h2>
+        <p className="sp-sub">
+          How each stock you hold now has moved over the period — total return, split- and
+          bonus-adjusted with dividends included — beside its momentum. This is the stocks&apos;
+          performance, not your P&amp;L: it ignores when you bought and what you paid.
+        </p>
+      </div>
+
+      <div className="sp-controls">
+        <div className="sp-seg" role="group" aria-label="Period">
+          {SP_PERIODS.map((p) => (
+            <button key={p} type="button" className={period === p ? 'active' : ''} aria-pressed={period === p}
+              onClick={() => setPeriod(p)}>{p}</button>
+          ))}
+        </div>
+        <select value={portfolio} onChange={(e) => setPortfolio(e.target.value)} className="sp-select" aria-label="Portfolio">
+          <option value="both">{portfolios.length ? `All (${portfolios.join(' + ')})` : 'All portfolios'}</option>
+          {portfolios.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <label className="sp-sortlbl">Sort by
+          <select value={sortBy} onChange={(e) => chooseSort(e.target.value)} className="sp-select">
+            {SP_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </label>
+        <button type="button" className="sp-dir" onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
+          title="Flip sort direction">{sortDir === 'desc' ? '▼ High → low' : '▲ Low → high'}</button>
+        {busy && <span className="sp-muted">{data ? 'updating…' : 'fetching prices…'}</span>}
+      </div>
+      {err && <p className="sp-neg">{err}</p>}
+      {data && !data.priceSource?.ok && (
+        <p className="sp-warn">
+          The price source did not answer for {data.priceSource.fetchFailed || 'some'} holding(s)
+          {data.priceSource.niftyStatus && data.priceSource.niftyStatus !== 'OK' ? ' and for Nifty' : ''}.
+          Figures below use whatever was cached; the fetch is retried automatically in 30 minutes.
+        </p>
+      )}
+
+      {s && (
+        <div className="sp-cards">
+          <div className="sp-card" title="Today's holdings, value-weighted, as if held unchanged through the whole period. It leaves out anything sold during the period, so it is survivorship-biased — the stocks' performance, not your return.">
+            <span>Stocks you hold now</span>
+            <strong><SpPct v={s.basketReturnPct} /></strong>
+            <em>if held unchanged since {data.windowStart} · not your P&amp;L</em>
+          </div>
+          <div className="sp-card">
+            <span>Nifty 50</span>
+            <strong><SpPct v={s.niftyPct} /></strong>
+            <em>same window</em>
+          </div>
+          <div className="sp-card">
+            <span>Beat Nifty</span>
+            <strong>{s.beatNifty} <small>of {s.priced}</small></strong>
+            <em>priced holdings</em>
+          </div>
+          <div className="sp-card" title="Holdings not in your portfolio when the period began: the stock's return is still real, but you did not own it for all of it. Judged from the holdings snapshot on or before the start date.">
+            <span>Bought mid-period</span>
+            {s.boughtInWindow == null
+              ? <><strong className="sp-muted">Unknown</strong><em>no holdings record on or before {data.windowStart}</em></>
+              : <><strong>{s.boughtInWindow}{s.holdingStartKnownFor < s.holdings && <small> of {s.holdingStartKnownFor} known</small>}</strong><em>marked ◐ below</em></>}
+          </div>
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div className="sp-scroll">
+          <table className="sp-table">
+            <thead>
+              <tr>
+                <Th k="score" title="0–100, ranked within this list: 40% return, 30% risk-adjusted return, 30% trend (average of price vs 50 and 200 EMA). Period-neutral, so 1M and 1Y scores compare on the same footing.">Score</Th>
+                <Th k="symbol" align="left">Stock</Th>
+                <Th k="weightPct" title="Share of the selected portfolios' current value">Weight</Th>
+                <Th k="returnPct" title="Total return over the period: split/bonus-adjusted, dividends included">Return</Th>
+                <Th k="vsNiftyPct" title="Return minus Nifty 50 over the same dates, in percentage points">vs Nifty</Th>
+                <Th k="riskAdj" title="Return divided by volatility over the period — a smooth 10% beats a violent 10%">Risk-adj</Th>
+                <Th k="maxDrawdownPct" title="Deepest peak-to-trough fall inside the period">Max DD</Th>
+                <Th k="rsi" title="Wilder RSI(14), daily. Above 70 is overbought, below 30 oversold. Shown, not scored.">RSI</Th>
+                <th scope="col" className="sp-th" title="Price vs its 20 / 50 / 200-day EMA">vs EMA 20 · 50 · 200</th>
+                <th scope="col" className="sp-th" style={{ textAlign: 'left' }}>EMA trend</th>
+                <Th k="from52wHighPct" title="Distance from the 52-week high">52W high</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.symbol} className={r.noData ? 'sp-nodata' : ''}>
+                  <td title={r.scoreParts ? `Return rank ${r.scoreParts.returnRank} · risk-adjusted rank ${r.scoreParts.riskAdjRank} · trend rank ${r.scoreParts.trendRank}` : 'Not enough price history to score'}>
+                    {r.score == null ? <span className="sp-muted">—</span>
+                      : <span className={`sp-scorepill ${r.score >= 67 ? 'hi' : r.score >= 34 ? 'mid' : 'lo'}`}>{r.score}</span>}
+                  </td>
+                  <td style={{ textAlign: 'left' }}>
+                    <div className="sp-sym">
+                      {r.symbol}
+                      <button type="button" className="sp-sleuth"
+                        onClick={() => navigate(`/stock-lookups?symbol=${encodeURIComponent(r.symbol)}`)}
+                        title={`Open Stock Sleuth for ${r.symbol}`}>🔎</button>
+                      {r.heldFullPeriod === false && (
+                        <span className="sp-partial" title={`Not in your holdings on ${data.windowStart}, when this period began — bought during it`}>◐</span>
+                      )}
+                    </div>
+                    <div className="sp-name">
+                      {[r.name, r.brokerCode, portfolio === 'both' ? r.portfolios?.join(' + ') : null,
+                        r.partialHistory ? 'listed mid-period' : null].filter(Boolean).join(' · ')}
+                    </div>
+                  </td>
+                  <td>{r.weightPct == null ? '—' : `${r.weightPct.toFixed(1)}%`}</td>
+                  {r.noData ? (
+                    <td colSpan={8} className="sp-muted sp-reason" style={{ textAlign: 'left' }}>No price — {r.reason}</td>
+                  ) : (
+                    <>
+                      <td><strong><SpPct v={r.returnPct} /></strong></td>
+                      <td><SpPct v={r.vsNiftyPct} suffix=" pts" /></td>
+                      <td><SpPct v={r.riskAdj} suffix="" digits={2} /></td>
+                      <td><SpPct v={r.maxDrawdownPct} /></td>
+                      <td className={r.rsi >= 70 ? 'sp-hot' : r.rsi != null && r.rsi <= 30 ? 'sp-cold' : ''}>{r.rsi == null ? '—' : r.rsi.toFixed(0)}</td>
+                      <td className="sp-emas">
+                        <SpPct v={r.ema20Pct} /> · <SpPct v={r.ema50Pct} /> · <SpPct v={r.ema200Pct} />
+                      </td>
+                      <td style={{ textAlign: 'left' }}>{r.emaLadder ? <EmaLadderBadge ladder={r.emaLadder} /> : '—'}</td>
+                      <td><SpPct v={r.from52wHighPct} /></td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {data && !rows.length && !busy && (
+        <p className="sp-muted">No current holdings in {portfolio === 'both' ? 'these portfolios' : portfolio}. Fetch or upload holdings on the Portfolio page.</p>
+      )}
+      {data && rows.length > 0 && (
+        <p className="sp-foot">
+          Prices as of {data.asOf}. Score is a rank within this list, so it answers &ldquo;relative to
+          everything else I hold&rdquo;; RSI is shown but not scored, since a high reading is strength
+          and overextension at once. ◐ = not held when the period began.
+          {unpriced.length > 0 && ` ${unpriced.length} holding(s) have no price and sit at the bottom whatever the sort.`}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function PerformancePage() {
   const [periodType, setPeriodType]   = useState('monthly');
   const [portfolio, setPortfolio]     = useState('both');
@@ -6014,6 +6230,7 @@ function PerformancePage() {
 
   return (
     <PageShell title="Performance" subtitle="Portfolio change vs Nifty 50 over time · Upload more portfolio CSVs on the Portfolio page to extend history">
+      <StockPerformancePanel />
       <div className="perf-controls">
         <div className="perf-toggle-group">
           {PERF_PERIODS.map(p => (

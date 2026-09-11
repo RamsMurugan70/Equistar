@@ -535,6 +535,12 @@ export function fetchBrokerage({ from = '', to = '', portfolio = '' } = {}) {
   return request(`/api/pnl/brokerage?${p.toString()}`);
 }
 
+// Per-stock performance of current holdings over 1M/3M/6M/1Y, with RSI/EMA and a ranked score.
+export function fetchStockPerformance({ period = '3M', portfolio = 'both' } = {}) {
+  const params = new URLSearchParams({ period, portfolio });
+  return request(`/api/performance/stocks?${params.toString()}`);
+}
+
 export function fetchPerformance({ period = 'monthly', portfolio = 'both' } = {}) {
   const params = new URLSearchParams({ period, portfolio });
   return request(`/api/performance/summary?${params.toString()}`);
