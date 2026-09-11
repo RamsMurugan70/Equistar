@@ -21,7 +21,7 @@ no domain, no DNS.
 | Thing | Where |
 |---|---|
 | Code | `/opt/equistar` on the VM — a git clone of this repository |
-| Secrets | `/opt/equistar/.env` — `SESSION_SECRET`, `CREDENTIAL_KEY`. Not in git |
+| Secrets | `/opt/equistar/.env` — `SESSION_SECRET`, `CREDENTIAL_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL` (Ask the Data). Not in git. After editing `.env`, run `sudo docker compose up -d equistar` — a plain `restart` does not reload it |
 | Port binding | `/opt/equistar/docker-compose.override.yml` — `127.0.0.1:5080:5080`. Not in git |
 | Data | Docker volume `equistar_equistar-data`: `hub.db`, `market.db`, `template.db`, `users/<id>/app.db` |
 | Backups | `/opt/equistar/*.tar.gz` |
