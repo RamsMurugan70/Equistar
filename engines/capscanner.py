@@ -172,7 +172,9 @@ def refresh_fundamentals(symbols, cache, cache_path, max_age_days, force, json_m
     stale = []
     for sym in symbols:
         ent = cache.get(sym)
-        if force or not ent:
+        # An entry without "raw" is from the fixed-threshold era, when only the finished score was
+        # cached. Peer ranking needs the inputs, so those are fetched again once.
+        if force or not ent or "raw" not in ent:
             stale.append(sym)
             continue
         try:
@@ -190,11 +192,12 @@ def refresh_fundamentals(symbols, cache, cache_path, max_age_days, force, json_m
     done = 0
     for sym in stale:
         try:
-            t = yf.Ticker(f"{sym}.NS")
-            f_score = ph.fundamental_score(t, sym)
+            raw = ph.fundamental_raw(yf.Ticker(f"{sym}.NS"))
         except Exception:
-            f_score = None
-        cache[sym] = {"f": f_score, "asof": today}
+            raw = None
+        # Inputs, not a score: a percentile depends on the peers scanned alongside, so it is
+        # computed at scan time from the whole cache.
+        cache[sym] = {"raw": raw, "asof": today}
         done += 1
         if done % 20 == 0:
             save_fund_cache(cache_path, cache)
@@ -245,7 +248,19 @@ def run(args):
         symbols, cache, cfg["fund_cache_file"], args.max_fund_age_days, args.refresh_fundamentals, json_mode)
     fund_asof_vals = [v.get("asof") for v in cache.values() if v.get("asof")]
     fund_asof = max(fund_asof_vals) if fund_asof_vals else None
-    fund_coverage = sum(1 for s in symbols if cache.get(s, {}).get("f") is not None)
+    # Peers are this universe PLUS the Nifty 500, when its scan has cached inputs. A sector index is
+    # a subset of the Nifty 500, so its stocks then score exactly as they do in the Nifty 500 scan
+    # instead of being ranked among ten names; a small- or micro-cap is compared with the listed
+    # leaders of its industry as well as with its own size band. Without a Nifty 500 cache (a
+    # fresh server) it falls back to this universe alone, and says so.
+    n500_raw, n500_ind = ph.load_peer_pool(BASE)
+    raw_pool = dict(n500_raw)
+    raw_pool.update({s: cache[s]["raw"] for s in symbols if cache.get(s, {}).get("raw")})
+    peer_industries = {**n500_ind, **industries}
+    fund = ph.industry_relative_fundamentals(raw_pool, peer_industries, targets=symbols)
+    fund_coverage = sum(1 for s in symbols if fund.get(s, {}).get("score") is not None)
+    log(f"Fundamentals ranked against {len(raw_pool)} peers"
+        + ("" if n500_raw else " (no Nifty 500 cache yet — this universe only)"), json_mode)
 
     hists = download_prices(symbols, json_mode)
     log(f"Price history loaded for {len(hists)} stocks.", json_mode)
@@ -257,7 +272,7 @@ def run(args):
             t_score, rsi_val = (t_result if t_result else (None, None))
             m_score, r1m, r3m, r6m = ph.momentum_score(hist)
             ladder, slope = ph.ema_trend(hist)
-            f_score = cache.get(sym, {}).get("f")
+            f_score = fund.get(sym, {}).get("score")
             valid = [s for s in [t_score, f_score, m_score] if s is not None]
             health = round(float(np.mean(valid)), 1) if valid else None
             close = hist["Close"].squeeze()
@@ -288,6 +303,7 @@ def run(args):
         "fundamentalsAsOf": fund_asof,
         "fundamentalsCoverage": fund_coverage,
         "fundamentalsRefreshed": refreshed,
+        "fundamentalsBasis": "industry-relative",
         "rows": rows,
     }
     if json_mode:

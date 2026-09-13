@@ -97,7 +97,9 @@ def refresh_fundamentals(symbols, cache, max_age_days, force, json_mode):
     stale = []
     for sym in symbols:
         ent = cache.get(sym)
-        if force or not ent:
+        # An entry without "raw" is from the fixed-threshold era, when only the finished score was
+        # cached. Peer ranking needs the inputs, so those are fetched again once.
+        if force or not ent or "raw" not in ent:
             stale.append(sym)
             continue
         try:
@@ -115,11 +117,12 @@ def refresh_fundamentals(symbols, cache, max_age_days, force, json_mode):
     done = 0
     for sym in stale:
         try:
-            t = yf.Ticker(f"{sym}.NS")
-            f_score = ph.fundamental_score(t, sym)
+            raw = ph.fundamental_raw(yf.Ticker(f"{sym}.NS"))
         except Exception:
-            f_score = None
-        cache[sym] = {"f": f_score, "asof": today}
+            raw = None
+        # Inputs, not a score: a percentile depends on the peers scanned alongside, so it is
+        # computed at scan time from the whole cache.
+        cache[sym] = {"raw": raw, "asof": today}
         done += 1
         if done % 20 == 0:
             save_fund_cache(cache)
@@ -175,7 +178,10 @@ def run(args):
         symbols, cache, args.max_fund_age_days, args.refresh_fundamentals, json_mode)
     fund_asof_vals = [v.get("asof") for v in cache.values() if v.get("asof")]
     fund_asof = max(fund_asof_vals) if fund_asof_vals else None
-    fund_coverage = sum(1 for s in symbols if cache.get(s, {}).get("f") is not None)
+    # Every stock ranked against its industry peers in this universe (see portfolio_health).
+    raw_pool = {s: cache[s]["raw"] for s in symbols if cache.get(s, {}).get("raw")}
+    fund = ph.industry_relative_fundamentals(raw_pool, industries, targets=symbols)
+    fund_coverage = sum(1 for s in symbols if fund.get(s, {}).get("score") is not None)
 
     # 2) Prices (batched daily)
     hists = download_prices(symbols, json_mode)
@@ -189,7 +195,7 @@ def run(args):
             t_score, rsi_val = (t_result if t_result else (None, None))
             m_score, r1m, r3m, r6m = ph.momentum_score(hist)
             ladder, slope = ph.ema_trend(hist)
-            f_score = cache.get(sym, {}).get("f")
+            f_score = fund.get(sym, {}).get("score")
             valid = [s for s in [t_score, f_score, m_score] if s is not None]
             health = round(float(np.mean(valid)), 1) if valid else None
             close = hist["Close"].squeeze()
@@ -226,6 +232,7 @@ def run(args):
         "fundamentalsAsOf": fund_asof,
         "fundamentalsCoverage": fund_coverage,
         "fundamentalsRefreshed": refreshed,
+        "fundamentalsBasis": "industry-relative",
         "rows": rows,
     }
     if json_mode:

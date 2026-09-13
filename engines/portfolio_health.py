@@ -4,7 +4,8 @@ Portfolio Health Scorer v1.1
 ===========================================
 Scores each holding on three equal pillars (33.3% each):
   - Technical Analysis  : RSI, MACD, Price vs 50DMA, 50DMA vs 200DMA
-  - Fundamental Analysis: P/E, P/B, ROE, Debt/Equity, Revenue Growth  (stocks only)
+  - Fundamental Analysis: P/E, P/B, ROE, Debt/Equity, Revenue Growth, each as a percentile
+                          within the stock's NSE industry (stocks only)
   - Price Momentum      : 1M (20%) + 3M (30%) + 6M (50%) weighted return
 
 ETFs get Technical + Momentum only (50/50), no Fundamental.
@@ -192,77 +193,213 @@ def technical_score(hist):
 
 
 # ─── Fundamental Score (0–100) — stocks only ─────────────────────────────────
-def fundamental_score(ticker_obj, stock_code):
+#
+# RANKED AGAINST INDUSTRY PEERS, NOT AGAINST FIXED THRESHOLDS.
+#
+# The first version scored every stock on one scale: a P/E under 12 earned 90 whether the stock
+# was a PSU oil refiner or an FMCG brand. Sectors trade on structurally different multiples, so
+# that scale mostly measured which sector a stock was in. On the 2026-09-05 Nifty 500 scan, Oil &
+# Gas averaged a fundamental score of 74 against 57 for FMCG and Healthcare, and in the small- and
+# micro-cap universes the score ran backwards: the top fifth by fundamental score went on to return
+# LESS than the bottom fifth over the next month.
+#
+# Now each metric is a percentile within the stock's NSE industry — cheaper than its peers, more
+# profitable than its peers, growing faster than its peers — and the score is the average of those
+# percentiles. It answers "is this a better business at a better price than the alternatives in
+# its own industry", which is the question a long-term buyer is actually choosing between.
+#
+#   metric          better when   notes
+#   P/E (trailing)  lower         a loss-maker ranks last, never "no data" — losing money is not neutral
+#   P/B             lower         negative book value ranks last
+#   ROE             higher
+#   Debt/Equity     lower         not scored for financials: leverage is a lender's raw material
+#   Revenue growth  higher
+#
+# An industry with too few peers carrying a metric is ranked against the whole peer pool for that
+# metric instead, and the basis is reported per metric, so a "90" is never quietly a ranking among
+# three companies.
+
+# Peers needed within an industry before an industry percentile means anything.
+MIN_INDUSTRY_PEERS = 8
+# Metrics a stock must carry for a fundamental score at all.
+MIN_METRICS = 3
+
+FIN_INDUSTRIES = {'Financial Services'}
+
+
+def is_financial(symbol, industry=None):
+    return (industry or '') in FIN_INDUSTRIES or symbol in FINANCIALS
+
+
+def fundamental_raw(ticker_obj):
+    """The five inputs, as reported, for ranking later. None when Yahoo returns nothing usable."""
     try:
-        info = ticker_obj.info
+        info = ticker_obj.info or {}
     except Exception:
         return None
 
+    def num(key):
+        v = info.get(key)
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return None
+        return v if np.isfinite(v) else None
+
+    raw = {
+        'pe': num('trailingPE'),
+        'fpe': num('forwardPE'),
+        'eps': num('trailingEps'),
+        'pb': num('priceToBook'),
+        'roe': num('returnOnEquity'),
+        'de': num('debtToEquity'),      # Yahoo reports this as a percentage
+        'revg': num('revenueGrowth'),
+    }
+    return raw if any(v is not None for v in raw.values()) else None
+
+
+def _metric_value(raw, metric, financial):
+    """(value, higher_is_better) for ranking, or None when the metric does not apply / is missing.
+    Loss-makers and negative book values get -inf on a lower-is-better metric's inverted scale so
+    they sort worst rather than dropping out."""
+    if metric == 'pe':
+        if raw.get('eps') is not None and raw['eps'] <= 0:
+            return float('-inf')              # loss-making: worst
+        pe = raw.get('pe')
+        return -pe if pe is not None and pe > 0 else None
+    if metric == 'pb':
+        pb = raw.get('pb')
+        if pb is None:
+            return None
+        return -pb if pb > 0 else float('-inf')
+    if metric == 'roe':
+        return raw.get('roe')
+    if metric == 'de':
+        if financial:
+            return None
+        de = raw.get('de')
+        return -de if de is not None and de >= 0 else None
+    if metric == 'revg':
+        return raw.get('revg')
+    return None
+
+
+FUND_METRICS = ('pe', 'pb', 'roe', 'de', 'revg')
+
+
+def _percentile(values, v):
+    """Share of values below v, ties counted half, on 0..100. One value alone sits at 50."""
+    n = len(values)
+    if n <= 1:
+        return 50.0
+    below = sum(1 for x in values if x < v)
+    equal = sum(1 for x in values if x == v) - 1
+    return 100.0 * (below + equal / 2.0) / (n - 1)
+
+
+def industry_relative_fundamentals(raw_by_symbol, industry_by_symbol, targets=None):
+    """
+    raw_by_symbol       {symbol: fundamental_raw dict}   — the peer pool
+    industry_by_symbol  {symbol: NSE industry}
+    targets             symbols to score (default: the whole pool); a target not in the pool is
+                        scored against it without joining it
+    returns {symbol: {'score': float|None, 'parts': {metric: pct}, 'basis': {metric: 'industry'|'pool'}}}
+    """
+    targets = list(raw_by_symbol) if targets is None else list(targets)
+
+    # Values per metric, overall and per industry.
+    pool = {m: [] for m in FUND_METRICS}
+    by_ind = {m: {} for m in FUND_METRICS}
+    for sym, raw in raw_by_symbol.items():
+        if not raw:
+            continue
+        ind = industry_by_symbol.get(sym) or ''
+        fin = is_financial(sym, ind)
+        for m in FUND_METRICS:
+            v = _metric_value(raw, m, fin)
+            if v is None:
+                continue
+            pool[m].append(v)
+            if ind:
+                by_ind[m].setdefault(ind, []).append(v)
+
+    out = {}
+    for sym in targets:
+        raw = raw_by_symbol.get(sym)
+        if not raw:
+            out[sym] = {'score': None, 'parts': {}, 'basis': {}}
+            continue
+        ind = industry_by_symbol.get(sym) or ''
+        fin = is_financial(sym, ind)
+        parts, basis = {}, {}
+        for m in FUND_METRICS:
+            v = _metric_value(raw, m, fin)
+            if v is None:
+                continue
+            peers = by_ind[m].get(ind) if ind else None
+            if peers and len(peers) >= MIN_INDUSTRY_PEERS:
+                values, basis[m] = peers, 'industry'
+            else:
+                values, basis[m] = pool[m], 'pool'
+            if sym not in raw_by_symbol:
+                values = values + [v]
+            parts[m] = round(_percentile(values, v), 1)
+        score = round(float(np.mean(list(parts.values()))), 1) if len(parts) >= MIN_METRICS else None
+        out[sym] = {'score': score, 'parts': parts, 'basis': basis}
+    return out
+
+
+def legacy_fundamental_from_raw(raw, financial):
+    """The original fixed-threshold score, kept for one purpose only: a holding scored when no peer
+    pool exists yet (before the first Nifty 500 scan on a fresh server). Flagged as such."""
+    if not raw:
+        return None
     parts = []
-    is_fin = stock_code in FINANCIALS
-
-    # P/E
-    pe = info.get('trailingPE') or info.get('forwardPE')
+    pe = raw.get('pe') or raw.get('fpe')
     if pe and 0 < pe < 300:
-        if pe < 12:     pe_s = 90
-        elif pe < 20:   pe_s = 75
-        elif pe < 30:   pe_s = 60
-        elif pe < 45:   pe_s = 42
-        else:           pe_s = 22
-        parts.append(pe_s)
-
-    # P/B
-    pb = info.get('priceToBook')
+        parts.append(90 if pe < 12 else 75 if pe < 20 else 60 if pe < 30 else 42 if pe < 45 else 22)
+    pb = raw.get('pb')
     if pb and pb > 0:
-        if pb < 1:      pb_s = 92
-        elif pb < 2:    pb_s = 78
-        elif pb < 4:    pb_s = 62
-        elif pb < 8:    pb_s = 42
-        else:           pb_s = 22
-        parts.append(pb_s)
-
-    # ROE
-    roe = info.get('returnOnEquity')
+        parts.append(92 if pb < 1 else 78 if pb < 2 else 62 if pb < 4 else 42 if pb < 8 else 22)
+    roe = raw.get('roe')
     if roe is not None:
         r = roe * 100
-        if r > 25:      roe_s = 92
-        elif r > 18:    roe_s = 78
-        elif r > 12:    roe_s = 62
-        elif r > 6:     roe_s = 42
-        else:           roe_s = 22
-        parts.append(roe_s)
-
-    # Debt/Equity — skip for financial sector
-    if not is_fin:
-        de = info.get('debtToEquity')
+        parts.append(92 if r > 25 else 78 if r > 18 else 62 if r > 12 else 42 if r > 6 else 22)
+    if not financial:
+        de = raw.get('de')
         if de is not None and de >= 0:
-            # ALWAYS A PERCENTAGE from Yahoo: 36.653 for Reliance means 0.37x, and 9.541 for
-            # Infosys means 0.095x — a company that is effectively debt-free. These bands are
-            # ratios, so the raw value has to be divided by 100 first. Without that, 318 of the
-            # 366 non-financials in the NIFTY 500 land past the last band and score 22, Infosys
-            # among them, dragging the whole fundamental leg down by roughly 11 points.
             de = de / 100.0
-            if de < 0.2:    de_s = 92
-            elif de < 0.5:  de_s = 78
-            elif de < 1.0:  de_s = 62
-            elif de < 2.0:  de_s = 42
-            else:           de_s = 22
-            parts.append(de_s)
+            parts.append(92 if de < 0.2 else 78 if de < 0.5 else 62 if de < 1.0 else 42 if de < 2.0 else 22)
+    g = raw.get('revg')
+    if g is not None:
+        g *= 100
+        parts.append(90 if g > 20 else 72 if g > 10 else 55 if g > 0 else 35 if g > -10 else 18)
+    return round(float(np.mean(parts)), 1) if parts else None
 
-    # Revenue growth (YoY)
-    rev_g = info.get('revenueGrowth')
-    if rev_g is not None:
-        g = rev_g * 100
-        if g > 20:      rg_s = 90
-        elif g > 10:    rg_s = 72
-        elif g > 0:     rg_s = 55
-        elif g > -10:   rg_s = 35
-        else:           rg_s = 18
-        parts.append(rg_s)
 
-    if not parts:
-        return None
-    return round(np.mean(parts), 1)
+def fundamental_score(ticker_obj, stock_code):
+    """Fixed-threshold score for one stock. Superseded by industry_relative_fundamentals(); kept so
+    existing single-stock callers keep working."""
+    return legacy_fundamental_from_raw(fundamental_raw(ticker_obj), is_financial(stock_code))
+
+
+def load_peer_pool(base_dir):
+    """The Nifty 500 raw-fundamentals cache and its industries — the peer pool every other scoring
+    path ranks against. ({}, {}) when no scan has populated it yet."""
+    raw, ind = {}, {}
+    try:
+        with open(os.path.join(base_dir, 'fund_cache_nifty500.json'), 'r', encoding='utf-8') as f:
+            for sym, ent in json.load(f).items():
+                if isinstance(ent, dict) and ent.get('raw'):
+                    raw[sym] = ent['raw']
+    except Exception:
+        pass
+    try:
+        cons = pd.read_csv(os.path.join(base_dir, 'nifty500_constituents.csv'))
+        ind = dict(zip(cons['Symbol'], cons['Industry']))
+    except Exception:
+        pass
+    return raw, ind
 
 
 # ─── Momentum Score (0–100) ──────────────────────────────────────────────────
@@ -318,6 +455,12 @@ def run(csv_path, output_json=False):
     start = end - timedelta(days=420)   # 420 days → enough for 200-DMA
 
     results = []
+
+    # Holdings are ranked against the same Nifty 500 peer pool the scanner caches, so a holding's
+    # fundamental score means the same thing on the Portfolio page as it does in the Top 25. Until
+    # a first scan has populated that pool, the fixed-threshold score is used and the row says so.
+    peer_raw, peer_ind = load_peer_pool(os.path.dirname(os.path.abspath(__file__)))
+    have_peers = len(peer_raw) >= 100
 
     if not output_json:
         print(f"\nFetching market data for {len(df)} holdings...\n")
@@ -376,7 +519,17 @@ def run(csv_path, output_json=False):
             t_score, rsi_val = (t_result if t_result else (None, None))
 
             # Fundamental (stocks only)
-            f_score = None if is_etf else fundamental_score(ticker, code)
+            f_score, fund_basis = None, None
+            if not is_etf:
+                nse = yfsym.split('.')[0]
+                raw = peer_raw.get(nse) or fundamental_raw(ticker)
+                if have_peers and raw:
+                    pool = peer_raw if nse in peer_raw else {**peer_raw, nse: raw}
+                    f_score = industry_relative_fundamentals(pool, peer_ind, targets=[nse])[nse]['score']
+                    fund_basis = 'industry-relative'
+                else:
+                    f_score = legacy_fundamental_from_raw(raw, is_financial(nse) or is_financial(code))
+                    fund_basis = 'fixed-threshold' if f_score is not None else None
 
             # Momentum
             m_score, r1m, r3m, r6m = momentum_score(hist)
@@ -401,6 +554,7 @@ def run(csv_path, output_json=False):
                 Name=name, Code=code, CMP=cmp, Qty=qty,
                 Tech=t_score,
                 Fund=f_score if not is_etf else None,
+                FundBasis=fund_basis,
                 Mom=m_score,
                 Score=health,
                 Rating=rating(health),
@@ -480,7 +634,7 @@ def run(csv_path, output_json=False):
 
     print(f"\n  Rating guide:  STRONG HOLD >= 70  |  HOLD 60-69  |  WATCH 50-59  |  WEAK 40-49  |  REVIEW < 40")
     print(f"  Momentum:      1M = last 21 days (20%) | 3M = 63 days (30%) | 6M = 126 days (50%)")
-    print(f"  D/E skipped for financials: HDFC Bk, ICICI, SBI, CUB, Ujjivan, PFC, REC, HDFC AMC, Anand Rathi, MCX")
+    print(f"  Fundamentals: percentile within NSE industry peers; D/E not scored for financials")
     print(SEP)
 
     # Save CSV beside the holdings file it scored, rather than in a fixed personal folder. In

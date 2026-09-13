@@ -18,6 +18,7 @@ router.get('/nifty500-stock-position', controller.nifty500StockPosition);
 router.get('/nifty500-symbols', controller.nifty500Symbols);
 router.get('/stock-insight', controller.stockInsight);
 router.get('/industry-scorecard', controller.industryScorecard);
+router.get('/score-validation', controller.scoreValidation);
 router.get('/index-symbols', controller.indexSymbols);
 router.get('/index-position', controller.indexPosition);
 router.post('/nifty500-scan', controller.nifty500Scan);

@@ -21,6 +21,7 @@ import {
   fetchSymbol52wBatch,
   fetchPerformance,
   fetchStockPerformance,
+  fetchScoreValidation,
   fetchInvestmentTrendReport,
   refreshScores,
   refreshAllScores,
@@ -5340,6 +5341,8 @@ function RecommendationsPage() {
 
       <TechCheckPanel />
 
+      <ScoreValidationPanel />
+
       <Nifty500TopPanel onAddRec={(prefill) => { setRecForm(prefill); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
 
       <Nifty500TopPanel universe="MIDCAP" title="Nifty Midcap 150 Daily Top 25" icon="🥈" totalLabel="~150"
@@ -5351,6 +5354,137 @@ function RecommendationsPage() {
       <Nifty500TopPanel universe="MICROCAP" title="Nifty Microcap 250 Daily Top 25" icon="🔬" totalLabel="~250"
         onAddRec={(prefill) => { setRecForm(prefill); window.scrollTo({ top: 0, behavior: 'smooth' }); }} />
     </PageShell>
+  );
+}
+
+// ── Does the ranking work? ───────────────────────────────────────────────────
+// The Top 25 lists below are only worth reading if higher scores went on to higher returns. This
+// checks exactly that against the server's own stored scans, and says plainly when there is too
+// little history to tell — which, for a long-term score, is most of the first year.
+const SV_UNIVERSES = [['NIFTY500', 'Nifty 500'], ['MIDCAP', 'Midcap 150'], ['SMALLCAP', 'Smallcap 250'], ['MICROCAP', 'Microcap 250']];
+const SV_FACTORS = [['combined_score', 'Combined score'], ['fundamental_score', 'Fundamental'],
+  ['momentum_score', 'Momentum'], ['technical_score', 'Technical']];
+const SV_HORIZON_LABEL = { '1M': '1 month later', '2M': '2 months later', '3M': '3 months later' };
+
+// A verdict is only given once there are three non-overlapping periods; before that the direction
+// is shown as a lean, so two overlapping months can never be read as a conclusion.
+function svVerdict(f, windows) {
+  if (!f || f.meanIc == null) return { text: '—', cls: 'sp-muted' };
+  const up = f.meanIc >= 0.03 && f.icPositiveShare >= 0.6;
+  const down = f.meanIc <= -0.03 && f.icPositiveShare <= 0.4;
+  if (windows < 3) {
+    return { text: up ? 'Too early · leaning right' : down ? 'Too early · leaning wrong' : 'Too early · no lean', cls: 'sp-muted' };
+  }
+  if (up) return { text: 'Predictive', cls: 'sp-pos' };
+  if (down) return { text: 'Backwards', cls: 'sp-neg' };
+  return { text: 'No clear signal', cls: 'sp-muted' };
+}
+
+function ScoreValidationPanel() {
+  const [universe, setUniverse] = useState('NIFTY500');
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    setBusy(true); setErr('');
+    fetchScoreValidation(universe)
+      .then((d) => { if (alive) setData(d); })
+      .catch((e) => { if (alive) setErr(e.message); })
+      .finally(() => { if (alive) setBusy(false); });
+    return () => { alive = false; };
+  }, [universe]);
+
+  const horizons = Object.entries(data?.horizons || {});
+  return (
+    <section className="sp-panel">
+      <div className="sp-head">
+        <h2>🧪 Does the ranking work?</h2>
+        <p className="sp-sub">
+          Checks each scan&apos;s scores against what the prices did next, using this server&apos;s own
+          scan history. A score is useful only if stocks it ranked higher went on to beat the ones it
+          ranked lower.
+        </p>
+      </div>
+      <div className="sp-controls">
+        <select className="sp-select" value={universe} onChange={(e) => setUniverse(e.target.value)} aria-label="Universe">
+          {SV_UNIVERSES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select>
+        {data && <span className="sp-muted">{data.scanDays} scan days · {data.firstScan} → {data.lastScan}</span>}
+        {busy && <span className="sp-muted">checking…</span>}
+      </div>
+      {err && <p className="sp-neg">{err}</p>}
+
+      {horizons.map(([h, s]) => (
+        <div key={h} style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: '4px 0 6px', fontSize: 14 }}>{SV_HORIZON_LABEL[h] || h}</h3>
+          {s.startDates === 0 ? (
+            <p className="sp-muted" style={{ margin: 0 }}>
+              Not enough history yet: this needs scans spanning at least {s.days} days.
+            </p>
+          ) : (
+            <>
+              {s.independentWindows < 3 && (
+                <p className="sp-warn">
+                  Only {s.independentWindows} non-overlapping {h} period{s.independentWindows === 1 ? '' : 's'} in
+                  the history ({s.startDates} start dates, almost all overlapping). Treat these figures as an
+                  early read, not proof either way.
+                </p>
+              )}
+              {s.top25?.dates > 0 && (
+                <p style={{ margin: '0 0 8px', fontSize: 13 }}>
+                  The Top 25 returned <strong><SpPct v={s.top25.top25Pct} /></strong>, against <SpPct v={s.top25.universePct} /> for
+                  the average stock in the list and <SpPct v={s.top25.niftyPct} /> for Nifty 50. It beat the average
+                  stock on {Math.round((s.top25.beatUniverseShare || 0) * 100)}% of start dates.
+                </p>
+              )}
+              <div className="sp-scroll">
+                <table className="sp-table">
+                  <thead>
+                    <tr>
+                      <th scope="col" className="sp-th" style={{ textAlign: 'left' }}>Score</th>
+                      <th scope="col" className="sp-th" title="Spearman rank correlation between the score and the return that followed, averaged over start dates. Above 0 means higher scores went on to higher returns; 0.05 is a meaningful edge for a stock score.">Rank correlation</th>
+                      <th scope="col" className="sp-th" title="Share of start dates on which that correlation was above zero">Right on</th>
+                      <th scope="col" className="sp-th" title="Average return of the highest-scored fifth of stocks">Top fifth</th>
+                      <th scope="col" className="sp-th" title="Average return of the lowest-scored fifth">Bottom fifth</th>
+                      <th scope="col" className="sp-th">Difference</th>
+                      <th scope="col" className="sp-th" style={{ textAlign: 'left' }}>Verdict</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {SV_FACTORS.map(([k, label]) => {
+                      const f = s.factors?.[k];
+                      const v = svVerdict(f, s.independentWindows);
+                      return (
+                        <tr key={k}>
+                          <td style={{ textAlign: 'left', fontWeight: 600 }}>{label}</td>
+                          <td>{f?.meanIc == null ? '—' : f.meanIc.toFixed(3)}</td>
+                          <td>{f?.icPositiveShare == null ? '—' : `${Math.round(f.icPositiveShare * 100)}%`}</td>
+                          <td><SpPct v={f?.topFifthPct} /></td>
+                          <td><SpPct v={f?.bottomFifthPct} /></td>
+                          <td><SpPct v={f?.spreadPct} suffix=" pts" /></td>
+                          <td style={{ textAlign: 'left' }} className={v.cls}>{v.text}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      ))}
+      {data && (
+        <p className="sp-foot">
+          Price returns on the scan&apos;s closing prices; dividends are not included. Stocks that split or
+          issued a bonus inside a window are left out of it ({horizons[0]?.[1]?.excludedForSplitOrBonus ?? 0} cases
+          over {horizons[0]?.[0]}), as are stocks that left the index before the window ended. One market
+          period only: a factor that worked in a rally can fail in a fall. For long-term investing, the
+          3-month and longer results are the ones that matter, and they need the most history.
+        </p>
+      )}
+    </section>
   );
 }
 

@@ -301,6 +301,11 @@ export function fetchIndustryScorecard(universe) {
   return request(`/api/recommendations/industry-scorecard${universe ? `?universe=${encodeURIComponent(universe)}` : ''}`);
 }
 
+// Whether a universe's scores predicted later returns, from its stored scan history.
+export function fetchScoreValidation(universe = 'NIFTY500') {
+  return request(`/api/recommendations/score-validation?universe=${encodeURIComponent(universe)}`);
+}
+
 export function fetchNifty500Top(limit = 25, universe = 'NIFTY500') {
   return request(`/api/recommendations/nifty500-top?limit=${limit}&universe=${universe}`);
 }
