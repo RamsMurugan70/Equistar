@@ -9,6 +9,7 @@ router.get('/live-breakdown', controller.getLiveBreakdown);
 router.get('/held-symbols', controller.getHeldSymbols);
 router.get('/holding', controller.getHoldingForSymbol);
 router.get('/holding-periods', controller.getHoldingPeriods);
+router.get('/tax-lots', controller.getTaxLots);
 router.post('/import-downloads', controller.importPortfoliosFromDownloads);
 
 // Cost basis overrides — must come before any wildcard routes

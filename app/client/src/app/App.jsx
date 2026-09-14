@@ -72,6 +72,7 @@ import {
   fetchRankMovementBatch,
   fetchHeldSymbols,
   fetchHoldingPeriods,
+  fetchTaxLots,
 } from '../services/api';
 import { fileToText, parsePortfolioCSV, parseZerodhaOrders } from '../utils/importParsers';
 import TechCheckPanel from './TechCheckPanel';
@@ -396,44 +397,6 @@ function PortfolioBadge({ portfolio, style }) {
   );
 }
 
-/**
- * FIFO lot computation.
- * orders: array of { portfolio, symbol, side, trade_date, quantity, price }
- * Returns Map<"portfolio::symbol", { date, qty, price }[]>
- */
-function computeOpenLots(orders) {
-  const map = new Map();
-
-  const sorted = [...orders].sort((a, b) =>
-    (a.trade_date || '').localeCompare(b.trade_date || ''),
-  );
-
-  for (const order of sorted) {
-    const key = `${order.portfolio}::${order.symbol}`;
-    if (!map.has(key)) map.set(key, []);
-    const lots = map.get(key);
-    const qty = Number(order.quantity || 0);
-    const price = Number(order.price || 0);
-    const side = String(order.side || '').toUpperCase();
-
-    if (side === 'BUY' || side === 'B') {
-      lots.push({ date: order.trade_date, qty, price });
-    } else if (side === 'SELL' || side === 'S') {
-      let remaining = qty;
-      while (remaining > 0 && lots.length > 0) {
-        if (lots[0].qty <= remaining) {
-          remaining -= lots[0].qty;
-          lots.shift();
-        } else {
-          lots[0].qty -= remaining;
-          remaining = 0;
-        }
-      }
-    }
-  }
-
-  return map;
-}
 
 // ─────────────────────────────────────────
 // SHARED COMPONENTS
@@ -1098,60 +1061,48 @@ function ActionQueuePage() {
 // ─────────────────────────────────────────
 
 function LtcgTrackerPage() {
-  const [ramsData,    setRamsData]    = useState(null);
-  const [geethaData,  setGeethaData]  = useState(null);
-  const [ramsOrders,  setRamsOrders]  = useState(null);
-  const [geethaOrders,setGeethaOrders]= useState(null);
+  // Open lots come from the server, replayed over EVERY equity order with splits and bonuses
+  // applied and reconciled against the quantity held (see taxLotsService). This page used to
+  // replay the latest 2,000 orders itself, keyed by broker code, for two hardcoded portfolio
+  // names — which found almost nothing long-term and nothing at all for any other account.
+  const [taxStatus,   setTaxStatus]   = useState(null);
+  const [holdingsByPf,setHoldingsByPf]= useState({});
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState('');
-  const [filter,      setFilter]      = useState('ALL'); // ALL | Rams | Geetha
-  const [taxFilter,   setTaxFilter]   = useState('ALL'); // ALL | LTCG | STCG | SOON
+  const [filter,      setFilter]      = useState('ALL'); // ALL | <portfolio name>
+  const [taxFilter,   setTaxFilter]   = useState('ALL'); // ALL | LTCG | STCG | SOON | NO_DATA
   const [sortBy,      setSortBy]      = useState('days_asc');
 
   useEffect(() => {
+    let alive = true;
     setLoading(true);
-    Promise.all([
-      fetchPortfolio('Rams'),
-      fetchPortfolio('Geetha'),
-      fetchOrders({ portfolio: 'Rams',   pageSize: 2000, page: 1 }),
-      fetchOrders({ portfolio: 'Geetha', pageSize: 2000, page: 1 }),
-    ])
-      .then(([rd, gd, ro, go]) => {
-        setRamsData(rd);
-        setGeethaData(gd);
-        setRamsOrders(ro);
-        setGeethaOrders(go);
-        setLoading(false);
+    fetchTaxLots()
+      .then(async (status) => {
+        const names = [...new Set(Object.keys(status).map((k) => k.split('::')[0]))];
+        const overviews = await Promise.all(names.map((pf) => fetchPortfolio(pf)));
+        if (!alive) return;
+        setTaxStatus(status);
+        setHoldingsByPf(Object.fromEntries(names.map((pf, i) => [pf, overviews[i]?.currentHoldings || []])));
       })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+      .catch((err) => { if (alive) setError(err.message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, []);
 
-  // Build open-lot map from all orders
-  const openLotMap = useMemo(() => {
-    const allOrders = [
-      ...(ramsOrders?.rows   || []),
-      ...(geethaOrders?.rows || []),
-    ];
-    return computeOpenLots(allOrders);
-  }, [ramsOrders, geethaOrders]);
+  const portfolioNames = useMemo(() => Object.keys(holdingsByPf), [holdingsByPf]);
 
   // Combine all current holdings, enrich with tax data
   const enrichedHoldings = useMemo(() => {
-    const rHoldings = (ramsData?.currentHoldings   || []).map((h) => ({ ...h, portfolio: 'Rams' }));
-    const gHoldings = (geethaData?.currentHoldings || []).map((h) => ({ ...h, portfolio: 'Geetha' }));
-    const all = [...rHoldings, ...gHoldings];
+    const all = Object.entries(holdingsByPf).flatMap(([pf, hs]) => hs.map((h) => ({ ...h, portfolio: pf })));
 
     return all.map((h) => {
-      const key  = `${h.portfolio}::${h.symbol}`;
-      const lots = openLotMap.get(key) || [];
-      // Earliest open lot = FIFO oldest remaining share
-      const earliestLot = lots.length > 0
-        ? lots.reduce((a, b) => (a.date < b.date ? a : b))
-        : null;
-      const earliestDate = earliestLot?.date || null;
+      const t = taxStatus?.[`${h.portfolio}::${String(h.nseSymbol || h.symbol).toUpperCase()}`]
+        || taxStatus?.[`${h.portfolio}::${String(h.symbol).toUpperCase()}`]
+        || null;
+      // Only a holding whose recorded lots square with what is held gets a tax status. The rest
+      // show what is missing instead of a confident answer built on a partial book.
+      const known = t && (t.basis === 'COMPLETE' || t.basis === 'TRIMMED');
+      const earliestDate = known ? t.earliestDate : null;
       const days = daysSince(earliestDate);
       const daysToLtcg = days !== null ? Math.max(0, LTCG_DAYS - days) : null;
       const isLtcg = days !== null && days >= LTCG_DAYS;
@@ -1165,10 +1116,13 @@ function LtcgTrackerPage() {
         isLtcg,
         isSoon,
         ltcgDate,
-        lotCount: lots.length,
+        taxBasis: t?.basis || 'NO_ORDERS',
+        excessQty: t?.excessQty || 0,
+        missingQty: t?.missingQty || 0,
+        actionsApplied: t?.actionsApplied || [],
       };
     });
-  }, [ramsData, geethaData, openLotMap]);
+  }, [holdingsByPf, taxStatus]);
 
   // Stocks approaching LTCG (within warning window)
   const soonHoldings = useMemo(
@@ -1245,22 +1199,21 @@ function LtcgTrackerPage() {
           tone={summary.ltcgPnl >= 0 ? 'positive' : 'negative'} />
         <StatCard label="STCG P&L"       value={`₹${fmt(summary.stcgPnl)}`}   helper="unrealized, STCG bucket"
           tone={summary.stcgPnl >= 0 ? 'positive' : 'negative'} />
-        <StatCard label="No Order Data"  value={summary.noDataCount} helper="orders not yet imported" />
+        <StatCard label="Unknown"        value={summary.noDataCount} helper="order history incomplete" />
       </div>
 
       {/* Filters */}
       <div className="filters">
         <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-          <option value="ALL">Both portfolios</option>
-          <option value="Rams">Rams only</option>
-          <option value="Geetha">Geetha only</option>
+          <option value="ALL">All portfolios</option>
+          {portfolioNames.map((pf) => <option key={pf} value={pf}>{pf} only</option>)}
         </select>
         <select value={taxFilter} onChange={(e) => setTaxFilter(e.target.value)}>
           <option value="ALL">All tax buckets</option>
           <option value="LTCG">LTCG only (&gt;365 days)</option>
           <option value="STCG">STCG only</option>
           <option value="SOON">Approaching LTCG</option>
-          <option value="NO_DATA">No order data</option>
+          <option value="NO_DATA">Unknown (history incomplete)</option>
         </select>
         <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
           <option value="days_asc">Shortest hold first (STCG risk)</option>
@@ -1275,8 +1228,11 @@ function LtcgTrackerPage() {
       <div className="panel">
         <h2 style={{ marginBottom: 4 }}>Holdings ({filtered.length})</h2>
         <p style={{ margin: '0 0 10px', color: '#565a6b', fontSize: '0.85rem' }}>
-          Earliest open lot date per holding computed via FIFO from your imported order history.
-          Stocks with no order data show "No data" — import your tradebooks on the Orders page to populate them.
+          Earliest open lot per holding, by FIFO over your whole order history. Splits keep the
+          original purchase date; bonus shares start a new lot on the ex-date, as tax law dates
+          them from allotment. Where the orders do not add up to what you hold, the status is
+          shown as unknown with the reason — import the missing tradebooks on the Orders page.
+          Verify with your broker's tax P&amp;L statement before acting on it.
         </p>
         <div style={{ overflowX: 'auto' }}>
           <table className="data-table compact-table">
@@ -1317,7 +1273,24 @@ function LtcgTrackerPage() {
                       <span className={h.isLtcg ? 'positive' : (h.isSoon ? '' : '')}>{h.isLtcg ? '✓ Achieved' : h.ltcgDate}</span>
                     ) : <span className="muted">—</span>}
                   </td>
-                  <td><TaxBadge days={h.days} /></td>
+                  <td>
+                    <TaxBadge days={h.days} />
+                    {h.taxBasis === 'TRIMMED' && (
+                      <div className="muted" style={{ fontSize: '0.75rem', marginTop: 3 }}
+                        title="The order book shows more shares than you hold, so some sells were never recorded. FIFO would have sold the oldest lots, so those are treated as sold — the date shown can only be later than the true one.">
+                        {fmt(h.excessQty)} unrecorded sells assumed
+                      </div>
+                    )}
+                    {h.taxBasis === 'MISSING_BUYS' && (
+                      <div className="muted" style={{ fontSize: '0.75rem', marginTop: 3 }}
+                        title="Some shares have no purchase on record (IPO allotment, transfer, or older than the imported history), so the oldest lot's date is unknown.">
+                        {fmt(h.missingQty)} shares with no purchase record
+                      </div>
+                    )}
+                    {h.taxBasis === 'UNADJUSTED' && (
+                      <div className="muted" style={{ fontSize: '0.75rem', marginTop: 3 }}>split/bonus could not be read</div>
+                    )}
+                  </td>
                 </tr>
               ))}
               {filtered.length === 0 && (

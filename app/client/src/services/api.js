@@ -217,6 +217,11 @@ export function fetchHoldingPeriods() {
   return request('/api/portfolio/holding-periods');
 }
 
+// Tax status per current holding: split/bonus-adjusted FIFO lots reconciled with what is held.
+export function fetchTaxLots() {
+  return request('/api/portfolio/tax-lots');
+}
+
 export function fetchRsiBatch(symbols) {
   return request(`/api/recommendations/rsi-batch?symbols=${encodeURIComponent(symbols.join(','))}`);
 }

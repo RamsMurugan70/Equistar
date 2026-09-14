@@ -41,6 +41,16 @@ async function getHoldingPeriods(_req, res, next) {
   }
 }
 
+// Open tax lots per holding, split- and bonus-adjusted, for the LTCG / STCG page.
+async function getTaxLots(_req, res, next) {
+  try {
+    const { getHoldingTaxStatus } = require('../services/portfolio/taxLotsService');
+    res.json(await getHoldingTaxStatus());
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function getLiveBreakdown(_req, res, next) {
   try {
     const data = await portfolioService.getLiveBreakdown();
@@ -80,4 +90,5 @@ module.exports = {
   getAsOfReport,
   getHeldSymbols,
   getHoldingPeriods,
+  getTaxLots,
 };
