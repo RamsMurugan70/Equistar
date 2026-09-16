@@ -17,6 +17,10 @@ const CATALOG = {
     label: 'ICICI Direct',
     connectable: true,
     portalUrl: 'https://api.icicidirect.com/apiuser/home',
+    // Said before the steps, because "do I have to pay for this?" is what stops people
+    // starting. Breeze is free to every ICICI Direct client.
+    costNote: 'Free. The Breeze API costs nothing for ICICI Direct clients, and registering the '
+      + 'app below takes about five minutes.',
     keyLabel: 'App Key',
     secretLabel: 'Secret Key',
     callbackPath: '/api/breeze/callback',
@@ -48,12 +52,18 @@ const CATALOG = {
     label: 'Zerodha Kite',
     connectable: true,
     portalUrl: 'https://developers.kite.trade/apps',
+    // FREE, and worth saying plainly. This used to read "a paid subscription of Rs 2,000/month",
+    // true until Zerodha made Kite Connect Personal free in 2025 and cut the paid plan to Rs 500.
+    // Personal leaves out live and historical MARKET data, which EquiStar never asks Zerodha for:
+    // it reads holdings, orders and trades, and prices come from elsewhere. The old note was
+    // turning people away from a connection that costs them nothing.
+    costNote: 'Free. Choose the "Personal" plan — it covers holdings, orders and trades, which '
+      + 'is all EquiStar reads. The paid plan only adds market data this app does not use.',
     keyLabel: 'API Key',
     secretLabel: 'API Secret',
     callbackPath: '/api/kite/callback',
     setupSteps: [
-      'Create a Kite Connect app at developers.kite.trade. This is a paid subscription of '
-        + '₹2,000/month, billed by Zerodha to you — it does not come with a trading account.',
+      'Create a Kite Connect app at developers.kite.trade and pick the free "Personal" plan.',
       'Set the app\'s Redirect URL to exactly the address shown below.',
       'Copy the API Key and API Secret from the app, and paste them below.',
     ],
@@ -68,6 +78,10 @@ const CATALOG = {
         + 'from a Console tradebook export — a Zerodha limit, not a fault here.'],
       ['Signed out of the broker every morning',
         'Expected. The token dies at 06:00 IST daily and cannot be renewed automatically.'],
+      ['Do I need the paid Kite Connect plan?',
+        'No. The paid plan adds live and historical market data from Zerodha, which EquiStar does '
+        + 'not use — it reads your holdings, orders and trades, and gets prices elsewhere. The '
+        + 'free Personal plan is enough.'],
     ],
   },
 };

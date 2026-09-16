@@ -1548,6 +1548,17 @@ a[role="button"], .btn-link, a.btn {
 
 /* The one-time broker setup, collapsed once it is done. Its links are for configuring an app at
    the broker, not for logging in, and conflating the two cost an afternoon. */
+/* "Free" said up front on the broker card: the cost question is what stops people starting. */
+.cost-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--pos-tint);
+  color: var(--pos);
+  font-size: .88rem;
+  line-height: 1.5;
+}
+
 .setup-steps summary { cursor: pointer; font-size: .88rem; color: var(--text-secondary, #565a6b); }
 .setup-steps[open] summary { margin-bottom: 8px; }
 .setup-steps ol { margin: 0; }

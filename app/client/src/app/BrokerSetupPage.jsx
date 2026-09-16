@@ -179,6 +179,10 @@ function BrokerCard({ broker, onSaved }) {
         </div>
       )}
 
+      {broker.costNote && (
+        <p className="cost-note">💡 {broker.costNote}</p>
+      )}
+
       <details className="setup-steps" open={!broker.configured}>
         <summary>{broker.configured ? 'One-time setup at the broker (already done)' : 'Step 1 — one-time setup at the broker'}</summary>
         <ol className="steps">

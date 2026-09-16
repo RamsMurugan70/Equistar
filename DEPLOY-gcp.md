@@ -228,9 +228,11 @@ https://YOUR-HOST.ts.net/u/<login>/api/breeze/callback
 
 Then run the first scan from the admin page, so everyone starts on the same fresh data.
 
-Worth saying to participants up front: **ICICI Direct's Breeze API is free; Zerodha's Kite Connect
-is a ₹2,000/month subscription**, billed by Zerodha to each person and not included with a trading
-account. Most people will only be able to connect ICICI.
+Worth saying to participants up front: **both broker connections are free.** ICICI Direct's Breeze
+API costs nothing, and Zerodha's Kite Connect has a free "Personal" plan that covers holdings,
+orders and trades — all EquiStar reads. Zerodha's paid plan (₹500/month) only adds live and
+historical market data, which this app never asks Zerodha for. The old ₹2,000/month figure was
+right until Zerodha changed its pricing in 2025, and repeating it kept people from connecting.
 
 ---
 
