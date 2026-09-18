@@ -1,9 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="EquiStar">
-  <defs><linearGradient id="es" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#00d99f"/><stop offset="1" stop-color="#00a878"/>
-  </linearGradient></defs>
-  <rect width="64" height="64" rx="15" fill="url(#es)"/>
-  <g fill="#fff">
+  <g fill="currentColor">
     <rect x="10" y="38" width="11" height="15" rx="5.5"/>
     <rect x="25.5" y="30" width="11" height="23" rx="5.5"/>
     <rect x="41" y="21" width="11" height="32" rx="5.5"/>

@@ -1,12 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="EquiStar">
-  <defs><linearGradient id="es" x1="0" y1="0" x2="0" y2="1">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 64" role="img" aria-label="EquiStar">
+  <defs><linearGradient id="esw" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0" stop-color="#00d99f"/><stop offset="1" stop-color="#00a878"/>
   </linearGradient></defs>
-  <rect width="64" height="64" rx="15" fill="url(#es)"/>
+  <rect width="64" height="64" rx="15" fill="url(#esw)"/>
   <g fill="#fff">
     <rect x="10" y="38" width="11" height="15" rx="5.5"/>
     <rect x="25.5" y="30" width="11" height="23" rx="5.5"/>
     <rect x="41" y="21" width="11" height="32" rx="5.5"/>
     <path d="M46.5 4c1.45 5.8 3.25 7.6 9.05 9.05-5.8 1.45-7.6 3.25-9.05 9.05-1.45-5.8-3.25-7.6-9.05-9.05 5.8-1.45 7.6-3.25 9.05-9.05z"/>
   </g>
+  <text x="80" y="42" font-family="Figtree, Segoe UI, system-ui, sans-serif" font-size="30" font-weight="800" fill="#1b1d28">Equi<tspan fill="#00a878">Star</tspan></text>
 </svg>
